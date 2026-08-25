@@ -1,51 +1,94 @@
 services:
-  intelboard:
-    image: ${INTELBOARD_IMAGE:-YOUR_DOCKERHUB_USERNAME/intelboard:latest}
-    container_name: intelboard
+  # 主程序：搜索、知识库、前端、定时任务
+  internetboard:
+    image: ${INTERNETBOARD_IMAGE:-milesxia/internetboard:latest}
+    container_name: internetboard
     restart: unless-stopped
+    pull_policy: always
     depends_on:
       ollama:
         condition: service_healthy
     ports:
       - "${HOST_PORT:-8733}:8080"
     volumes:
-      - /share/Container/intelboard/data:/app/data
+      - /share/Container/internetboard/data:/app/data
     environment:
       TZ: ${TZ:-Asia/Shanghai}
       DATA_DIR: /app/data
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me-now}
       SESSION_SECRET: ${SESSION_SECRET:-please-change-this-session-secret}
+      SESSION_HTTPS_ONLY: ${SESSION_HTTPS_ONLY:-false}
+
+      # 27B 只做最终判断；2.5GB 4B 文本模型负责大量分块提炼
       OLLAMA_BASE_URL: http://ollama:11434
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-auto}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.8:27b-q4_K_M}
+      OLLAMA_EXTRACT_MODEL: ${OLLAMA_EXTRACT_MODEL:-qwen3:4b-instruct-2507-q4_K_M}
       AUTO_PULL_MODEL: ${AUTO_PULL_MODEL:-true}
       OLLAMA_NUM_CTX: ${OLLAMA_NUM_CTX:-8192}
+      OLLAMA_NUM_GPU: ${OLLAMA_NUM_GPU:-4}
+      OLLAMA_EXTRACT_NUM_GPU: ${OLLAMA_EXTRACT_NUM_GPU:-99}
+      OLLAMA_NUM_THREAD: ${OLLAMA_NUM_THREAD:-6}
+      OLLAMA_EXTRACT_NUM_THREAD: ${OLLAMA_EXTRACT_NUM_THREAD:-4}
+      OLLAMA_FINAL_THINK: ${OLLAMA_FINAL_THINK:-medium}
+
+      # 分块→提炼→融合→最终推理；应用端禁止静默截断
+      AI_CHUNK_TOKENS: ${AI_CHUNK_TOKENS:-2400}
+      AI_CHUNK_OVERLAP_TOKENS: ${AI_CHUNK_OVERLAP_TOKENS:-180}
+      AI_EXTRACT_PREDICT: ${AI_EXTRACT_PREDICT:-320}
+      AI_REDUCE_TOKENS: ${AI_REDUCE_TOKENS:-3200}
+      AI_REDUCE_PREDICT: ${AI_REDUCE_PREDICT:-500}
+      AI_FINAL_TOKENS: ${AI_FINAL_TOKENS:-5000}
+      AI_FINAL_PREDICT: ${AI_FINAL_PREDICT:-1200}
+      MAX_HISTORY_CLAIMS: ${MAX_HISTORY_CLAIMS:-60}
+      BACKFILL_EVIDENCE_PER_RUN: ${BACKFILL_EVIDENCE_PER_RUN:-3}
+
+      # 长期知识检索：小知识库先用关键词/FTS；达到阈值后按需启用语义向量
+      OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-qwen3-embedding:0.6b}
+      ENABLE_EMBEDDINGS: ${ENABLE_EMBEDDINGS:-true}
+      SEMANTIC_RAG_MIN_CLAIMS: ${SEMANTIC_RAG_MIN_CLAIMS:-200}
+      EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-24}
+      SEMANTIC_CANDIDATE_LIMIT: ${SEMANTIC_CANDIDATE_LIMIT:-80}
+
+      # 有限二次补搜 + 持久任务队列；NAS重启后可从断点继续
+      ENABLE_GAP_SEARCH: ${ENABLE_GAP_SEARCH:-true}
+      MAX_FOLLOWUP_QUERIES: ${MAX_FOLLOWUP_QUERIES:-2}
+      QUEUE_POLL_SECONDS: ${QUEUE_POLL_SECONDS:-2}
+      QUEUE_MAX_ATTEMPTS: ${QUEUE_MAX_ATTEMPTS:-3}
+      AUTO_BACKUP_KEEP: ${AUTO_BACKUP_KEEP:-7}
+
       SCHEDULE_HOUR: "3"
       SCHEDULE_MINUTE: "0"
       MAX_FETCH_CONCURRENCY: ${MAX_FETCH_CONCURRENCY:-3}
       MAX_SEARCH_RESULTS: ${MAX_SEARCH_RESULTS:-8}
       MAX_CANDIDATES_PER_TOPIC: ${MAX_CANDIDATES_PER_TOPIC:-20}
-      AI_CONTEXT_CHARS: ${AI_CONTEXT_CHARS:-18000}
       REQUEST_TIMEOUT: ${REQUEST_TIMEOUT:-25}
       SEARXNG_URL: ${SEARXNG_URL:-}
       ARCHIVE_FULLTEXT: ${ARCHIVE_FULLTEXT:-true}
+    mem_limit: ${APP_MEMORY_LIMIT:-3g}
     networks:
-      - intelboard-net
+      - internetboard-net
 
+  # 本地推理：同一时间只驻留一个模型，避免40GB内存被双模型同时占满
   ollama:
     image: ollama/ollama:latest
-    container_name: intelboard-ollama
+    container_name: internetboard-ollama
     restart: unless-stopped
+    pull_policy: always
     volumes:
-      - /share/Container/intelboard/ollama:/root/.ollama
+      - /share/Container/internetboard/ollama:/root/.ollama
     environment:
       OLLAMA_HOST: 0.0.0.0
       OLLAMA_KEEP_ALIVE: 10m
       OLLAMA_NUM_PARALLEL: "1"
       OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_MAX_QUEUE: "64"
       OLLAMA_CONTEXT_LENGTH: ${OLLAMA_NUM_CTX:-8192}
       OLLAMA_FLASH_ATTENTION: "1"
       OLLAMA_KV_CACHE_TYPE: q8_0
+      OLLAMA_GPU_OVERHEAD: ${OLLAMA_GPU_OVERHEAD:-402653184}
       NVIDIA_VISIBLE_DEVICES: all
+    # 给QTS永久留出系统内存，避免AI把整台NAS拖死
+    mem_limit: ${OLLAMA_MEMORY_LIMIT:-30g}
     deploy:
       resources:
         reservations:
@@ -57,11 +100,12 @@ services:
       test: ["CMD", "ollama", "list"]
       interval: 15s
       timeout: 10s
-      retries: 12
+      retries: 20
       start_period: 30s
     networks:
-      - intelboard-net
+      - internetboard-net
 
 networks:
-  intelboard-net:
+  internetboard-net:
+    name: internetboard-net
     driver: bridge

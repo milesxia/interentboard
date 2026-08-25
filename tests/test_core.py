@@ -28,7 +28,7 @@ def test_material_rules():
 
 
 def test_model_choice_for_user_hardware():
-    assert choose_model("auto", memory_gb=40) == "qwen3:30b-a3b-instruct-2507-q4_K_M"
+    assert choose_model("auto", memory_gb=40) == "qwen3.8:27b-q4_K_M"
     assert choose_model("qwen3.5:9b", memory_gb=40) == "qwen3.5:9b"
 
 

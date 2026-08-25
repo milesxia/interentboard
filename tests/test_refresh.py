@@ -10,6 +10,7 @@ os.environ["AUTO_PULL_MODEL"] = "false"
 from app.db import Database
 from app.services.analyzer import Analyzer
 from app.services.baseline import BaselineStore
+from app.services.knowledge import KnowledgePipeline
 from app.services.ollama import OllamaClient
 from app.services.refresh import RefreshEngine
 from app.services.search import SearchHit, SearchOutcome
@@ -19,11 +20,17 @@ class DummySettings:
     max_candidates_per_topic = 5
     max_fetch_concurrency = 2
     archive_fulltext = True
+    ai_chunk_tokens = 1200
+    ai_chunk_overlap_tokens = 100
+    max_history_claims = 30
+    backfill_evidence_per_run = 2
 
     def __init__(self, root):
         self.data_dir = Path(root)
         self.archive_dir = self.data_dir / "archive"
+        self.manual_archive_dir = self.data_dir / "manual"
         self.archive_dir.mkdir(parents=True, exist_ok=True)
+        self.manual_archive_dir.mkdir(parents=True, exist_ok=True)
 
 
 class FakeSearcher:
@@ -57,8 +64,11 @@ async def test_refresh_end_to_end():
             "queries": ["测试项目"], "seed_urls": [], "official_domains": ["example.local"], "context_keywords": ["测试项目"], "discipline": "中标不等于开工"
         }]
         db.seed_topics(topics)
-        ollama = OllamaClient("http://none", "qwen3.5:4b", mock=True)
-        engine = RefreshEngine(db, topics, FakeSearcher(), FakeFetcher(), Analyzer(ollama), BaselineStore(baseline), DummySettings(base))
+        ollama = OllamaClient("http://none", "qwen3.8:27b-q4_K_M", mock=True)
+        analyzer = Analyzer(ollama, chunk_tokens=1200)
+        settings = DummySettings(base)
+        kp = KnowledgePipeline(db, analyzer, settings)
+        engine = RefreshEngine(db, topics, FakeSearcher(), FakeFetcher(), analyzer, BaselineStore(baseline), kp, settings)
         run_id = await engine.refresh_topic("test", "manual")
         runs = db.list_runs(1)
         assert runs[0]["id"] == run_id
@@ -68,3 +78,8 @@ async def test_refresh_end_to_end():
         assert len(ev) == 1
         assert ev[0]["source_grade"] == "A"
         assert ev[0]["archive_path"]
+        assert ev[0]["processing_status"] == "done"
+        chunks = db.list_chunks(ev[0]["id"])
+        assert chunks and all(x["status"] == "done" for x in chunks)
+        claims = db.claims_for_evidence(ev[0]["id"])
+        assert claims

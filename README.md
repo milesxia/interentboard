@@ -1,81 +1,82 @@
-# IntelBoard 0.2.0
+# InternetBoard 0.4.0
 
-面向长期项目跟踪的 **本地 AI 情报看板**。当前版本按你的硬件基线设计：
+面向 QNAP NAS 长期运行的本地 AI 情报 / 知识系统。v0.4 重点把“自动搜新闻后总结”升级为可恢复、可追溯、会积累、会二次补搜的长期研究流水线。
 
-- QNAP TS-673A / AMD Ryzen V1500B
-- NVIDIA GTX 1650 4GB
-- 40GB RAM
-- QNAP Container Station / Docker Compose
-- 数据目录统一使用 `/share/Container/intelboard`
+## v0.4 核心能力
 
-内置《综合交接文件 V2.8》作为初始知识基线，之后每天联网获取新证据并持续积累。
+- **完整性优先**：长文按段落切块并重叠，应用端控制 token；Ollama 请求 `truncate=false`，不允许静默丢掉后半段。
+- **分层模型**：Qwen3 4B 负责大量证据提取 / 融合 / 搜索缺口判断；Qwen3.8 27B 只做最终判断和预测。
+- **持久任务队列**：刷新、人工知识处理都进入 SQLite 队列；NAS / 容器重启后恢复排队，已完成 chunk 不重算。
+- **运行步骤账本**：搜索、抓取、提取、补搜、综合分析都记录进度和状态。
+- **二次补搜**：首轮证据提取后，4B 判断仍缺哪些关键证据，最多自动追加 2 条精确查询。
+- **页面变化检测**：同一 URL 再次出现时比较新旧版本；小改动只分析新增/变化部分，同时保留完整新版本。
+- **转载 / 镜像识别**：内容哈希 + SimHash 识别重复和近重复文章，同源转载不会被误算成多份独立证据。
+- **长期 Claim 知识库**：事实、计划、预测、传闻拆成独立 Claim，记录来源、时间、确定性、实体、可信度。
+- **知识生命周期**：自动记录 supports / conflicts / supersedes / duplicate；旧知识不删除，只标记被替代。
+- **人工知识自动入库**：粘贴新闻或手打情报后自动保存原文、AI 提炼并写入长期知识库。
+- **人工修改最高优先**：Claim 可编辑 / 删除 / 查看版本；`human_override` 不会被 AI 自动覆盖。
+- **混合历史检索**：关键词规则 + SQLite FTS + 可选语义向量；知识量达到门槛后按需启用 `qwen3-embedding:0.6b`。
+- **增量分析**：没有新证据、没有到期节点时跳过 27B 重复推理。
+- **搜索健康管理**：记录每个引擎耗时 / 成功率；连续故障自动短时熔断，避免一个失败引擎拖慢整轮任务。
+- **持久性能指标**：记录模型用途、prompt / generation tokens、t/s、GPU 层、耗时和成功率。
+- **实时状态**：前端使用 SSE 获取任务状态，断开时自动回退轮询。
+- **自动备份**：每天 03:00 正式任务前创建 SQLite 一致性备份，默认保留最近 7 份。
+- **NAS 保护**：Ollama 30GB、主程序 3GB 的默认内存上限；AI 并发 1，保证 QTS 有资源余量。
 
-## 已包含
-
-- 完整 Web 前端：总览、五大专题、系统状态
-- FastAPI 后端
-- 本地 SQLite/WAL 知识数据库（单机 NAS 低维护、无需额外数据库容器）
-- V2.8 历史知识基线导入
-- 每天 **03:00** 自动完整检索
-- 全部 / 单专题 **立即刷新**
-- 联网搜索 + 官方入口定向抓取
-- HTML / PDF 文本提取
-- 原始 HTML/PDF + 提取全文本地归档
-- URL / 内容 Hash 去重
-- A / B+ / B / C 来源分级
-- 搜索失败与“未发现”记录
-- P / E / T 阶段规则
-- 双时间戳：完整增量检索 / 专项复核
-- 到期节点自动追加复核检索词
-- AI 变化总结、趋势判断、预测、下一观察节点
-- 人工确认 / 排除证据
-- 历史快照
-- 一键下载知识库备份
-- Ollama 本地模型，不调用云 AI
-- QNAP GPU Compose + CPU 兜底 Compose
-- GitHub Codespaces
-- GitHub Actions 自动构建推送 Docker Hub（linux/amd64）
-
-## 40GB RAM 模型策略
-
-默认 `OLLAMA_MODEL=auto`：
-
-- **≥36GB RAM**：`qwen3:30b-a3b-instruct-2507-q4_K_M`（约19GB，主分析模型）
-- ≥20GB：`qwen3.5:9b`
-- ≥12GB：`qwen3.5:4b`
-- 更低：`qwen3.5:2b`
-
-你的 40GB TS-673A 会自动选 30B-A3B Instruct Q4。系统不会把几十篇网页逐篇交给大模型，而是先由程序抓取、去重、筛选，最后每个专题做一次综合分析；所有专题严格顺序运行，并发为 1。
-
-为了给 QTS、文件缓存和抓取任务留余量，默认把模型上下文限制为 8192 tokens。
-
-## QNAP 持久化
+## 默认模型
 
 ```text
-/share/Container/intelboard/data      # 数据库、证据全文、备份
-/share/Container/intelboard/ollama    # 本地模型
+证据提取 / 融合 / 搜索缺口：qwen3:4b-instruct-2507-q4_K_M
+最终分析：qwen3.8:27b-q4_K_M
+语义向量（达到阈值后按需）：qwen3-embedding:0.6b
 ```
 
-访问：
+## 持久化目录
 
 ```text
-http://NAS_IP:8733
+/share/Container/internetboard/data
+/share/Container/internetboard/ollama
 ```
 
-详细部署见 `QNAP-DEPLOY.md`。
+数据库继续使用：
 
-## Codespaces / Docker Hub
+```text
+/share/Container/internetboard/data/intelboard.db
+```
 
-详细流程见 `CODESPACES-DOCKERHUB.md`。
+升级不会删除原有 v0.2 / v0.3 数据；启动时自动执行增量数据库迁移。
 
-## 本地开发验证
+## 核心流水线
+
+```text
+联网搜索 / 人工输入
+        ↓
+保存原始全文 + 抓取元数据
+        ↓
+URL规范化 / 转载识别 / 页面版本变化
+        ↓
+按段落切块 + 完整性账本
+        ↓
+Qwen3 4B：逐块事实提取
+        ↓
+Claim 长期知识库
+        ↓
+首轮知识缺口判断 → 有价值时二次补搜
+        ↓
+关键词 + FTS + 语义向量混合检索历史知识
+        ↓
+Qwen3.8 27B：最终阶段 / 风险 / 趋势 / 预测
+        ↓
+知识关系更新 + 时间线 + 下一观察节点
+```
+
+## 测试
 
 ```bash
-python -m venv .venv
-. .venv/bin/activate
-pip install -r requirements-dev.txt
-MOCK_AI=true AUTO_PULL_MODEL=false pytest -q
-MOCK_AI=true AUTO_PULL_MODEL=false python scripts/smoke_test.py
+PYTHONPATH=. MOCK_AI=true AUTO_PULL_MODEL=false pytest -q
+PYTHONPATH=. MOCK_AI=true AUTO_PULL_MODEL=false python scripts/smoke_test.py
 ```
 
-当前交付环境若没有 Docker daemon，只能完成应用实跑、单元测试、联网抓取及 Compose 静态解析；Docker 镜像的真实 build/run 应在 Codespaces 的 Docker 环境继续执行，项目已提供对应配置与命令。
+## 参考方向
+
+架构设计吸收了 Local Deep Research 的持久任务 / 指标 / 研究状态思路、GPT Researcher 的多阶段与反思补搜、RAGFlow 的混合知识检索、changedetection.io 的变化检测、ArchiveBox 的原始证据归档和 Perplexica 的多源搜索思路；InternetBoard 的代码和数据结构按本项目长期专题跟踪需求重新实现。

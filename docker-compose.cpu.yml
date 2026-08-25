@@ -1,7 +1,7 @@
 services:
-  intelboard:
-    image: ${INTELBOARD_IMAGE:-YOUR_DOCKERHUB_USERNAME/intelboard:latest}
-    container_name: intelboard
+  internetboard:
+    image: ${INTERNETBOARD_IMAGE:-milesxia/internetboard:latest}
+    container_name: internetboard
     restart: unless-stopped
     depends_on:
       ollama:
@@ -9,34 +9,47 @@ services:
     ports:
       - "${HOST_PORT:-8733}:8080"
     volumes:
-      - /share/Container/intelboard/data:/app/data
+      - /share/Container/internetboard/data:/app/data
     environment:
       TZ: ${TZ:-Asia/Shanghai}
       DATA_DIR: /app/data
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me-now}
       SESSION_SECRET: ${SESSION_SECRET:-please-change-this-session-secret}
       OLLAMA_BASE_URL: http://ollama:11434
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-auto}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.8:27b-q4_K_M}
+      OLLAMA_EXTRACT_MODEL: ${OLLAMA_EXTRACT_MODEL:-qwen3:4b-instruct-2507-q4_K_M}
       AUTO_PULL_MODEL: ${AUTO_PULL_MODEL:-true}
+      OLLAMA_NUM_GPU: "0"
+      OLLAMA_EXTRACT_NUM_GPU: "0"
       OLLAMA_NUM_CTX: ${OLLAMA_NUM_CTX:-8192}
+      AI_CHUNK_TOKENS: ${AI_CHUNK_TOKENS:-2400}
+      AI_CHUNK_OVERLAP_TOKENS: ${AI_CHUNK_OVERLAP_TOKENS:-180}
+      AI_FINAL_TOKENS: ${AI_FINAL_TOKENS:-5000}
+      OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-qwen3-embedding:0.6b}
+      ENABLE_EMBEDDINGS: ${ENABLE_EMBEDDINGS:-true}
+      SEMANTIC_RAG_MIN_CLAIMS: ${SEMANTIC_RAG_MIN_CLAIMS:-200}
+      ENABLE_GAP_SEARCH: ${ENABLE_GAP_SEARCH:-true}
+      MAX_FOLLOWUP_QUERIES: ${MAX_FOLLOWUP_QUERIES:-2}
+      QUEUE_POLL_SECONDS: ${QUEUE_POLL_SECONDS:-2}
+      QUEUE_MAX_ATTEMPTS: ${QUEUE_MAX_ATTEMPTS:-3}
+      AUTO_BACKUP_KEEP: ${AUTO_BACKUP_KEEP:-7}
       SCHEDULE_HOUR: "3"
       SCHEDULE_MINUTE: "0"
       MAX_FETCH_CONCURRENCY: ${MAX_FETCH_CONCURRENCY:-3}
       MAX_SEARCH_RESULTS: ${MAX_SEARCH_RESULTS:-8}
       MAX_CANDIDATES_PER_TOPIC: ${MAX_CANDIDATES_PER_TOPIC:-20}
-      AI_CONTEXT_CHARS: ${AI_CONTEXT_CHARS:-18000}
       REQUEST_TIMEOUT: ${REQUEST_TIMEOUT:-25}
       SEARXNG_URL: ${SEARXNG_URL:-}
       ARCHIVE_FULLTEXT: ${ARCHIVE_FULLTEXT:-true}
-    networks:
-      - intelboard-net
+    mem_limit: ${APP_MEMORY_LIMIT:-3g}
+    networks: [internetboard-net]
 
   ollama:
     image: ollama/ollama:latest
-    container_name: intelboard-ollama
+    container_name: internetboard-ollama
     restart: unless-stopped
     volumes:
-      - /share/Container/intelboard/ollama:/root/.ollama
+      - /share/Container/internetboard/ollama:/root/.ollama
     environment:
       OLLAMA_HOST: 0.0.0.0
       OLLAMA_KEEP_ALIVE: 10m
@@ -45,15 +58,15 @@ services:
       OLLAMA_CONTEXT_LENGTH: ${OLLAMA_NUM_CTX:-8192}
       OLLAMA_FLASH_ATTENTION: "1"
       OLLAMA_KV_CACHE_TYPE: q8_0
+    mem_limit: ${OLLAMA_MEMORY_LIMIT:-30g}
     healthcheck:
       test: ["CMD", "ollama", "list"]
       interval: 15s
       timeout: 10s
-      retries: 12
+      retries: 20
       start_period: 30s
-    networks:
-      - intelboard-net
+    networks: [internetboard-net]
 
 networks:
-  intelboard-net:
+  internetboard-net:
     driver: bridge

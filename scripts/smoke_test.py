@@ -13,11 +13,16 @@ from app.services.fetch import Fetcher
 def check_compose():
     for f in ["docker-compose.yml", "docker-compose.cpu.yml", "docker-compose.dev.yml"]:
         doc = yaml.safe_load(Path(f).read_text(encoding="utf-8"))
-        assert "services" in doc and "intelboard" in doc["services"]
+        assert "services" in doc and "internetboard" in doc["services"]
     gpu = yaml.safe_load(Path("docker-compose.yml").read_text(encoding="utf-8"))
     devices = gpu["services"]["ollama"]["deploy"]["resources"]["reservations"]["devices"]
     assert devices[0]["driver"] == "nvidia"
-    print("[OK] Compose YAML parsed; NVIDIA reservation present")
+    env = gpu["services"]["internetboard"]["environment"]
+    assert "OLLAMA_EMBED_MODEL" in env
+    assert "ENABLE_GAP_SEARCH" in env
+    assert "QUEUE_MAX_ATTEMPTS" in env
+    assert Path("VERSION").read_text().strip() == "0.4.0"
+    print("[OK] Compose YAML parsed; NVIDIA/RAG/queue settings present")
 
 
 def check_topics():

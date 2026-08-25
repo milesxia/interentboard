@@ -3,35 +3,49 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}IntelBoard{% endblock %}</title>
+  <title>{% block title %}InternetBoard{% endblock %}</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <header>
-  <div class="brand"><a href="/">IntelBoard</a><span>本地项目情报看板</span></div>
+  <div class="brand"><a href="/">InternetBoard</a><span>本地长期情报知识库</span></div>
   <nav><a href="/">总览</a><a href="/settings">系统</a><form action="/logout" method="post"><button class="linkbtn">退出</button></form></nav>
 </header>
 <main>{% block content %}{% endblock %}</main>
 <script>
 async function doRefresh(url, btn){
-  const old=btn.textContent; btn.disabled=true; btn.textContent='正在启动…';
+  const old=btn.textContent; btn.disabled=true; btn.textContent='加入队列…';
   try {
     const r=await fetch(url,{method:'POST'}); const data=await r.json();
     if(!r.ok) throw new Error(data.message || '请求失败');
-    btn.textContent='检索运行中';
-    pollRuns();
+    btn.textContent='已排队'; window.__hadBusy=true;
+    setTimeout(()=>{btn.disabled=false;btn.textContent=old},1800);
   } catch(e){ alert('启动失败：'+e.message); btn.disabled=false; btn.textContent=old; }
 }
-async function pollRuns(){
-  try{
-    const r=await fetch('/api/runs'); if(!r.ok)return; const d=await r.json();
-    const box=document.querySelector('[data-run-state]');
-    if(box){ box.textContent=d.busy?'检索运行中':'空闲'; box.className=d.busy?'runbadge busy':'runbadge'; }
-    if(d.busy){ setTimeout(pollRuns,2500); } else if(window.__hadBusy){ location.reload(); }
-    window.__hadBusy = window.__hadBusy || d.busy;
-  }catch(e){}
+function applyRunState(d){
+  const box=document.querySelector('[data-run-state]');
+  if(box){ box.textContent=d.busy?'任务运行/排队中':'空闲'; box.className=d.busy?'runbadge busy':'runbadge'; }
+  const latest=document.querySelector('[data-run-message]');
+  if(latest){
+    const active=(d.steps||[]).filter(x=>x.status==='running').slice(-1)[0];
+    if(active){
+      const count=active.total?(' '+active.current+'/'+active.total):'';
+      latest.textContent=active.step_name+count+' · '+(active.detail||'');
+    }else if(d.runs && d.runs[0]){
+      latest.textContent=(d.runs[0].progress||0)+'% · '+(d.runs[0].message||'');
+    }
+  }
+  window.__hadBusy = window.__hadBusy || d.busy;
 }
-setTimeout(pollRuns,800);
+async function pollRuns(){
+  try{ const r=await fetch('/api/runs'); if(r.ok) applyRunState(await r.json()); }catch(e){}
+  setTimeout(pollRuns,5000);
+}
+try{
+  const es=new EventSource('/api/events');
+  es.onmessage=(ev)=>{try{applyRunState(JSON.parse(ev.data))}catch(e){}};
+  es.onerror=()=>{es.close();pollRuns();};
+}catch(e){pollRuns();}
 </script>
 </body>
 </html>

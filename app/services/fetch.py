@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
 import httpx
@@ -19,13 +19,15 @@ class FetchedPage:
     content_hash: str
     content_type: str
     raw: bytes
+    status_code: int = 200
+    headers: dict[str, str] = field(default_factory=dict)
 
 
 class Fetcher:
     def __init__(self, timeout: int = 25):
         self.timeout = timeout
         self.headers = {
-            "User-Agent": "Mozilla/5.0 (compatible; IntelBoard/0.2; local research dashboard)",
+            "User-Agent": "Mozilla/5.0 (compatible; InternetBoard/0.4; local research dashboard)",
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.6",
         }
 
@@ -62,4 +64,8 @@ class Fetcher:
             if not text:
                 raise ValueError("empty page text")
             digest = hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()
-            return FetchedPage(final_url, title[:500], text, digest, ct, raw)
+            keep_headers = {}
+            for k in ("content-type", "last-modified", "etag", "date", "cache-control"):
+                if r.headers.get(k):
+                    keep_headers[k] = r.headers[k]
+            return FetchedPage(final_url, title[:500], text, digest, ct, raw, r.status_code, keep_headers)
