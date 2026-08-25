@@ -1,8 +1,0 @@
-.git
-.github
-.devcontainer
-__pycache__
-.pytest_cache
-.venv
-data/*
-*.zip
