@@ -1,0 +1,111 @@
+topics:
+  - slug: sanle
+    name: 三乐 / 淮安路687弄4号
+    current_state: "仍处观察期；4号道路直接风险高于红线外楼栋，但未进入正式征收程序。句容路北段P8在建；南段尚未正式项目化；普济路桥P2。"
+    risk_level: unchanged
+    last_full_scan: "2026-08-24T14:41:00+08:00"
+    last_special_review: "2026-08-25T13:45:00+08:00"
+    current_summary: "重点判断句容路南段是否项目化、普济路桥是否正式立项、046-a是否调整、687弄是否进入调查/测绘/征收/大修。日常治理仅作弱背景。"
+    stage_state: {"句容路北段": "P8", "句容路南段": "P0/P1", "普济路桥": "P2", "687弄4号": "E0"}
+    discipline: "规划红线不等于征收；北段不能外推南段；弱背景不得改变征收风险；到期计划必须重新核实。"
+    context_keywords: ["淮安路687弄", "句容路", "普济路桥", "046-a", "三乐新村"]
+    official_domains: ["jingan.gov.cn", "shanghai.gov.cn", "jtw.sh.gov.cn", "swj.sh.gov.cn"]
+    seed_urls:
+      - "https://www.shanghai.gov.cn/nw15343/20260730/8855320b47fe4e9faa56abe4662ad692.html"
+      - "https://www.jingan.gov.cn/govxxgk/JG0/2026-07-16/81fa19b5-c1bc-48de-aeb7-78eddb2e0ada.html?type=2"
+    watch_nodes:
+      - id: sanle-jurong-north-2026-09
+        title: 句容路北段9月竣工/开放计划复核
+        due_date: "2026-09-30"
+        queries:
+          - 'site:jingan.gov.cn 句容路 竣工 开放'
+          - 'site:shanghai.gov.cn 句容路 竣工 开放 静安'
+    queries:
+      - 'site:jingan.gov.cn "淮安路687弄"'
+      - 'site:jingan.gov.cn "句容路" "海防路" "昌平路"'
+      - 'site:jingan.gov.cn "普济路桥"'
+      - 'site:jingan.gov.cn "046-a"'
+      - 'site:shanghai.gov.cn "句容路" 静安'
+
+  - slug: jingan15
+    name: 静安区“十五五”规划
+    current_state: "以重大行政决策目录为母表，分别维护编制状态与公开状态；综合交通发展和水务等多项仍待正式公开文本。"
+    risk_level: not_applicable
+    last_full_scan: "2026-08-24T14:41:00+08:00"
+    last_special_review: "2026-08-25T13:45:00+08:00"
+    current_summary: "只报告真正新阶段或新发布；未公开不等于延期；目录计划完成时间不等于公开发布日期。"
+    stage_state: {}
+    discipline: "编制状态与公开状态分开；起草说明不等于正式印发；名称相近的规划不得自动等同。"
+    context_keywords: ["静安区", "十五五", "综合交通发展和水务", "重大行政决策", "规划"]
+    official_domains: ["jingan.gov.cn"]
+    seed_urls:
+      - "https://www.jingan.gov.cn/govxxgk/JA1/2026-03-16/35e279ad-2502-4035-a5f3-3fea5766a7f5.html?type=2"
+    queries:
+      - 'site:jingan.gov.cn "十五五" "规划"'
+      - 'site:jingan.gov.cn "综合交通发展和水务"'
+      - 'site:jingan.gov.cn "重大行政决策" "十五五"'
+
+  - slug: sanlin
+    name: 浦东三林区域城市更新
+    current_state: "地块一相关国有居住房屋已进入E5初期；非居临时商业用地清退时间仍不明确；三林新天地按分块实施跟踪。"
+    risk_level: not_applicable
+    last_full_scan: "2026-08-24T14:41:00+08:00"
+    current_summary: "地块一必须独立；重点跟评估、签约、搬迁、非居清退、土地出让；229亩与590.81亩等空间口径不得混用。"
+    stage_state: {"地块一居住房屋": "E5", "三林新天地": "P1/P2", "世博水环": "P8"}
+    discipline: "地块一独立成段；国有居住与非居清退分开；地块名称相近不自动等同。"
+    context_keywords: ["三林", "地块一", "西林村", "济阳路1875号", "三林新天地", "城中村"]
+    official_domains: ["pudong.gov.cn", "zfcg.sh.gov.cn", "valuer.org.cn"]
+    seed_urls:
+      - "https://valuer.org.cn/Index/Content/4109"
+    queries:
+      - 'site:pudong.gov.cn 三林 西林村 征收'
+      - 'site:pudong.gov.cn 三林 城中村 地块一'
+      - 'site:zfcg.sh.gov.cn 三林 西林村 拆除'
+      - 'site:valuer.org.cn 三林 西林村 评估'
+
+  - slug: shanghai-major
+    name: 上海市重大项目动态
+    current_state: "滚动增量新闻专题，只扫描上一次实际查询之后新增的重大批复、开工、贯通、竣工、投运和重大规划。"
+    risk_level: not_applicable
+    last_full_scan: "2026-08-25T13:32:00+08:00"
+    current_summary: "默认筛选少量高新闻价值项目；历史新闻只用于去重，不因新闻里的计划日期建立长期任务。"
+    stage_state: {}
+    discipline: "只报新增；旧文件重发和多源转载去重；优先市政府、发改委、交通委、重大工程、各区政府。"
+    context_keywords: ["上海市重大工程", "重大项目", "可研", "开工", "竣工", "通车", "投运"]
+    official_domains: ["shanghai.gov.cn", "fgw.sh.gov.cn", "jtw.sh.gov.cn", "zjw.sh.gov.cn", "swj.sh.gov.cn"]
+    seed_urls: []
+    queries:
+      - 'site:shanghai.gov.cn 上海 重大工程 开工 OR 竣工 OR 通车'
+      - 'site:jtw.sh.gov.cn 上海 重大工程'
+      - 'site:fgw.sh.gov.cn 上海 项目 可研 批复'
+
+  - slug: s4
+    name: S4 / 外环西段 / 嘉闵线
+    current_state: "S4地面道路收尾；外环西段P8推进；嘉闵线P8建设中。S20西段→S4与S4→S20西段当前均按T0管理。"
+    risk_level: not_applicable
+    last_full_scan: "2026-08-24T14:41:00+08:00"
+    last_special_review: "2026-08-24T15:45:00+08:00"
+    current_summary: "工程进度与双向通行体验同时跟踪。箱梁完成不等于交通开放；匝道翻交、辅道贯通和连续成网更关键。"
+    stage_state: {"S4地面道路": "P8/P9局部", "外环西段": "P8", "S20西段→S4": "T0", "S4→S20西段": "T0", "嘉闵线": "P8"}
+    discipline: "主线高架15.3km与地面辅道18.1km不得混淆；两个方向体验独立判断；主体完成不等于开放。"
+    context_keywords: ["S4", "外环西段", "莘庄立交", "嘉闵线", "银都路", "S20"]
+    official_domains: ["jtw.sh.gov.cn", "shmetro.com", "shanghai.gov.cn", "minhang.gov.cn"]
+    seed_urls:
+      - "https://jtw.sh.gov.cn/xydt/20260312/d7c132f76dd84228855eb58b141d486b.html"
+      - "https://jtw.sh.gov.cn/xydt/20230301/1be025a1688242f290c970562df02fa1.html"
+    watch_nodes:
+      - id: s4-yindu-2026-12
+        title: S4银都路节点2026年底计划复核
+        due_date: "2026-12-31"
+        queries:
+          - 'site:minhang.gov.cn S4 银都路 完工 开放'
+      - id: jiamin-2028-12
+        title: 嘉闵线2028年底通车计划复核
+        due_date: "2028-12-31"
+        queries:
+          - 'site:shmetro.com 嘉闵线 通车 运营'
+    queries:
+      - 'site:jtw.sh.gov.cn 外环西段 莘庄立交'
+      - 'site:shanghai.gov.cn 外环西段 莘庄立交'
+      - 'site:shmetro.com 嘉闵线 银都路'
+      - 'site:minhang.gov.cn S4 银都路 莘朱路'

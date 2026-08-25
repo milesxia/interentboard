@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}IntelBoard{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <div class="brand"><a href="/">IntelBoard</a><span>本地项目情报看板</span></div>
+  <nav><a href="/">总览</a><a href="/settings">系统</a><form action="/logout" method="post"><button class="linkbtn">退出</button></form></nav>
+</header>
+<main>{% block content %}{% endblock %}</main>
+<script>
+async function doRefresh(url, btn){
+  const old=btn.textContent; btn.disabled=true; btn.textContent='正在启动…';
+  try {
+    const r=await fetch(url,{method:'POST'}); const data=await r.json();
+    if(!r.ok) throw new Error(data.message || '请求失败');
+    btn.textContent='检索运行中';
+    pollRuns();
+  } catch(e){ alert('启动失败：'+e.message); btn.disabled=false; btn.textContent=old; }
+}
+async function pollRuns(){
+  try{
+    const r=await fetch('/api/runs'); if(!r.ok)return; const d=await r.json();
+    const box=document.querySelector('[data-run-state]');
+    if(box){ box.textContent=d.busy?'检索运行中':'空闲'; box.className=d.busy?'runbadge busy':'runbadge'; }
+    if(d.busy){ setTimeout(pollRuns,2500); } else if(window.__hadBusy){ location.reload(); }
+    window.__hadBusy = window.__hadBusy || d.busy;
+  }catch(e){}
+}
+setTimeout(pollRuns,800);
+</script>
+</body>
+</html>

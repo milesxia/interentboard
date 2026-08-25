@@ -1,0 +1,67 @@
+services:
+  intelboard:
+    image: ${INTELBOARD_IMAGE:-YOUR_DOCKERHUB_USERNAME/intelboard:latest}
+    container_name: intelboard
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_healthy
+    ports:
+      - "${HOST_PORT:-8733}:8080"
+    volumes:
+      - /share/Container/intelboard/data:/app/data
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      DATA_DIR: /app/data
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me-now}
+      SESSION_SECRET: ${SESSION_SECRET:-please-change-this-session-secret}
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-auto}
+      AUTO_PULL_MODEL: ${AUTO_PULL_MODEL:-true}
+      OLLAMA_NUM_CTX: ${OLLAMA_NUM_CTX:-8192}
+      SCHEDULE_HOUR: "3"
+      SCHEDULE_MINUTE: "0"
+      MAX_FETCH_CONCURRENCY: ${MAX_FETCH_CONCURRENCY:-3}
+      MAX_SEARCH_RESULTS: ${MAX_SEARCH_RESULTS:-8}
+      MAX_CANDIDATES_PER_TOPIC: ${MAX_CANDIDATES_PER_TOPIC:-20}
+      AI_CONTEXT_CHARS: ${AI_CONTEXT_CHARS:-18000}
+      REQUEST_TIMEOUT: ${REQUEST_TIMEOUT:-25}
+      SEARXNG_URL: ${SEARXNG_URL:-}
+      ARCHIVE_FULLTEXT: ${ARCHIVE_FULLTEXT:-true}
+    networks:
+      - intelboard-net
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: intelboard-ollama
+    restart: unless-stopped
+    volumes:
+      - /share/Container/intelboard/ollama:/root/.ollama
+    environment:
+      OLLAMA_HOST: 0.0.0.0
+      OLLAMA_KEEP_ALIVE: 10m
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_CONTEXT_LENGTH: ${OLLAMA_NUM_CTX:-8192}
+      OLLAMA_FLASH_ATTENTION: "1"
+      OLLAMA_KV_CACHE_TYPE: q8_0
+      NVIDIA_VISIBLE_DEVICES: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 15s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+    networks:
+      - intelboard-net
+
+networks:
+  intelboard-net:
+    driver: bridge
