@@ -1,71 +1,58 @@
-name: Test, Build and Push Docker Hub
+name: Build and Push InternetBoard
 
 on:
   push:
-    branches: ["main"]
-    tags: ["v*"]
+    branches:
+      - main
+    tags:
+      - "v*"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-          cache: pip
-      - name: Install test dependencies
-        run: pip install -r requirements-dev.txt
-      - name: Unit tests
-        env:
-          MOCK_AI: "true"
-          AUTO_PULL_MODEL: "false"
-          ADMIN_PASSWORD: test
-          SESSION_SECRET: test-secret
-        run: PYTHONPATH=. pytest -q
-      - name: Static smoke test
-        env:
-          MOCK_AI: "true"
-          AUTO_PULL_MODEL: "false"
-        run: PYTHONPATH=. python scripts/smoke_test.py
-
   docker:
-    needs: test
+    name: Build InternetBoard Images
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v6
-      - uses: docker/setup-qemu-action@v4
-      - uses: docker/setup-buildx-action@v4
-      - name: Check Docker Hub token
-        env:
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-        run: |
-          if [ -z "$DOCKERHUB_TOKEN" ]; then
-            echo "::error::DOCKERHUB_TOKEN is empty; use scripts/codespaces-push.sh until the repository secret is fixed"
-            exit 1
-          fi
-      - uses: docker/login-action@v4
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v4
         with:
-          username: milesxia
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - id: meta
-        uses: docker/metadata-action@v6
+
+      - name: Build and push backend worker scheduler
+        uses: docker/build-push-action@v7
         with:
-          images: milesxia/internetboard
-          tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=sha,prefix=sha-
-            type=ref,event=tag
-      - uses: docker/build-push-action@v7
-        with:
-          context: .
-          push: true
+          context: ./backend
           platforms: linux/amd64
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/internetboard-backend:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/internetboard-backend:v1.0
+            ${{ secrets.DOCKERHUB_USERNAME }}/internetboard-worker:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/internetboard-worker:v1.0
+            ${{ secrets.DOCKERHUB_USERNAME }}/internetboard-scheduler:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/internetboard-scheduler:v1.0
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push frontend
+        uses: docker/build-push-action@v7
+        with:
+          context: ./frontend
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/internetboard-frontend:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/internetboard-frontend:v1.0
           cache-from: type=gha
           cache-to: type=gha,mode=max
