@@ -61,6 +61,7 @@ def build_handoff_markdown() -> Path:
         sources = list(session.scalars(select(Source).order_by(Source.retrieved_at.desc()).limit(120)))
         watches = list(session.scalars(select(WebsiteWatch).order_by(WebsiteWatch.id.asc()).limit(500)))
         versions = list(session.scalars(select(KnowledgeVersion).order_by(KnowledgeVersion.created_at.desc()).limit(300)))
+        visual_source_count = sum(1 for item in sources if (item.metadata_json or {}).get("visual"))
 
         runs_by_topic = defaultdict(list)
         claims_by_topic = defaultdict(list)
@@ -115,6 +116,7 @@ def build_handoff_markdown() -> Path:
             f"- Entities included: {len(entities)}",
             f"- Relations included: {len(relations)}",
             f"- Evidence sources included: {len(sources)}",
+            f"- Visual evidence included: {visual_source_count}",
             "",
         ]
 
@@ -181,7 +183,16 @@ def build_handoff_markdown() -> Path:
                     lines.append(f"- URL: {_safe(source.url)}")
                     lines.append(f"- Retrieved: {_dt(source.retrieved_at)}")
                     lines.append(f"- MIME: {_safe(source.mime_type)}")
-                    excerpt = _safe(source.content)[:800]
+                    meta = source.metadata_json or {}
+                    if meta.get("visual"):
+                        lines.append("- Visual evidence: yes")
+                        lines.append(f"- Visual kind: {_safe(meta.get('visual_kind'))}")
+                        if meta.get("page_number"):
+                            lines.append(f"- PDF page: {meta.get('page_number')}")
+                        lines.append(f"- Visual hash: {_safe(meta.get('visual_hash'))}")
+                        if meta.get("parent_source_id"):
+                            lines.append(f"- Parent source id: {meta.get('parent_source_id')}")
+                    excerpt = _safe(source.content)[:1200 if meta.get("visual") else 800]
                     if excerpt:
                         lines.extend(["", excerpt, ""])
 

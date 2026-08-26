@@ -30,3 +30,7 @@ Persistent directories under `/share/Container/internetboard` are not removed du
 ## Access
 
 There is no InternetBoard application API-key prompt in the trusted-LAN profile. Do not expose the service directly to the public Internet; use HTTPS and access control at the reverse proxy/VPN layer if remote access is required.
+
+## Visual evidence
+
+InternetBoard automatically inspects useful images embedded in fetched HTML and image-heavy/scanned PDF pages with the same Qwen3.8 27B model. Visual evidence is bounded (default: max 2 assets per source and 4 per run), normalized before inference, deduplicated by image hash inside a topic, archived under `/share/Container/internetboard/data/visual`, linked to Claims/Entities/Relations, and included in the LLM handoff export. Logos, tiny icons and obvious QR/avatar assets are skipped heuristically.

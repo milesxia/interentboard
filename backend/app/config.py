@@ -35,6 +35,20 @@ class Settings(BaseSettings):
     max_sources_per_run: int = 8
     max_total_ai_chunks: int = 12
     max_ai_chunks_per_source: int = 3
+    visual_enabled: bool = True
+    visual_max_assets_per_source: int = 2
+    visual_max_assets_per_run: int = 4
+    visual_max_candidates_per_source: int = 10
+    visual_max_image_bytes: int = 8 * 1024 * 1024
+    visual_min_width: int = 280
+    visual_min_height: int = 160
+    visual_min_pixels: int = 100_000
+    visual_max_dimension: int = 1600
+    visual_request_timeout_seconds: int = 30
+    visual_pdf_max_pages: int = 2
+    visual_pdf_text_threshold: int = 350
+    visual_pdf_scale: float = 1.4
+    visual_num_predict: int = 1000
     max_fetch_bytes: int = 25 * 1024 * 1024
     chunk_chars: int = 5500
     chunk_overlap_chars: int = 500
@@ -70,6 +84,9 @@ class Settings(BaseSettings):
     @property
     def conflict_dir(self) -> Path:
         return self.data_dir / "conflict"
+    @property
+    def visual_dir(self) -> Path:
+        return self.data_dir / "visual"
 
     def ensure_directories(self) -> None:
         for path in (
@@ -79,6 +96,7 @@ class Settings(BaseSettings):
             self.knowledge_dir,
             self.history_dir,
             self.conflict_dir,
+            self.visual_dir,
             self.data_dir / "vector",
             self.data_dir / "exports",
             self.data_dir / ".bootstrap",

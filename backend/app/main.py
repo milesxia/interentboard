@@ -112,6 +112,8 @@ def system_status() -> dict:
             "max_search_rounds": settings.max_search_rounds,
             "max_sources_per_run": settings.max_sources_per_run,
             "max_total_ai_chunks": settings.max_total_ai_chunks,
+            "visual_enabled": settings.visual_enabled,
+            "max_visual_assets_per_run": settings.visual_max_assets_per_run,
         },
         "counts": {
             "topics": topic_count,

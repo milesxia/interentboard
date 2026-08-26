@@ -18,6 +18,7 @@ from .ollama_client import ollama
 from .schemas import ChunkAnalysis
 from .search import SearchResult, search_web
 from .utils import atomic_write_json, estimate_tokens, normalize_space, sha256_text
+from .visual import VisualAsset, archive_visual_asset, extract_visual_assets
 
 logger = logging.getLogger(__name__)
 
@@ -197,6 +198,146 @@ def _topic_brief(topic: Topic) -> str:
     return "\n\n".join(part for part in parts if part)
 
 
+def _visual_analysis_key(topic: Topic, asset: VisualAsset) -> str:
+    return sha256_text(
+        f"visual-v1|{topic.id}|{topic.name}|{topic.query}|{topic.description}|{settings.ollama_model}|{asset.content_hash}"
+    )
+
+
+def _visual_text(analysis: ChunkAnalysis, asset: VisualAsset) -> str:
+    lines = [
+        "[VISUAL EVIDENCE]",
+        f"kind: {asset.kind}",
+        f"source: {asset.source_url}",
+        f"page: {asset.page_number or ''}",
+        f"size: {asset.width}x{asset.height}",
+        f"title: {analysis.title}",
+        f"category: {analysis.category}",
+        "claims:",
+    ]
+    lines.extend(f"- {item.text}" for item in analysis.claims)
+    if analysis.entities:
+        lines.append("entities: " + ", ".join(item.name for item in analysis.entities))
+    if analysis.relations:
+        lines.append("relations:")
+        lines.extend(f"- {item.subject} --[{item.predicate}]--> {item.object}" for item in analysis.relations)
+    if analysis.search_gaps:
+        lines.append("search_gaps:")
+        lines.extend(f"- {item}" for item in analysis.search_gaps)
+    return "\n".join(lines)[:30000]
+
+
+def _digest_from_analysis(*, source: Source, analysis: ChunkAnalysis, content_hash: str, persisted: dict | None = None) -> dict:
+    return {
+        "content_hash": content_hash,
+        "source_title": source.title,
+        "source_url": source.canonical_url or source.url,
+        "evidence_type": "visual" if (source.metadata_json or {}).get("visual") else "text",
+        "claims": [item.model_dump() for item in analysis.claims],
+        "entities": [item.model_dump() for item in analysis.entities],
+        "relations": [item.model_dump() for item in analysis.relations],
+        "gaps": analysis.search_gaps,
+        "importance": analysis.importance,
+        "confidence": analysis.confidence,
+        "persisted": persisted or {},
+    }
+
+
+def _load_cached_visual(source: Source) -> ChunkAnalysis | None:
+    meta = source.metadata_json or {}
+    payload = meta.get("visual_analysis")
+    if not meta.get("visual") or not isinstance(payload, dict):
+        return None
+    try:
+        return ChunkAnalysis.model_validate(payload)
+    except Exception:
+        return None
+
+
+def _process_visual_asset(*, topic: Topic, run_id: int, parent_source_id: int, asset: VisualAsset) -> dict | None:
+    cache_key = _visual_analysis_key(topic, asset)
+    source_id: int
+    with session_scope() as session:
+        source = session.scalar(select(Source).where(Source.topic_id == topic.id, Source.content_hash == asset.content_hash))
+        if source:
+            source.last_seen_at = utcnow()
+            source.seen_count += 1
+            source.run_id = run_id
+            _link_run_source(session, run_id, source.id)
+            meta = source.metadata_json or {}
+            if meta.get("visual_analysis_key") == cache_key:
+                cached = _load_cached_visual(source)
+                if cached:
+                    return _digest_from_analysis(source=source, analysis=cached, content_hash=asset.content_hash)
+            source_id = source.id
+        else:
+            storage_path = archive_visual_asset(asset, topic.id)
+            source = Source(
+                topic_id=topic.id,
+                run_id=run_id,
+                url=asset.source_url,
+                canonical_url=asset.source_url,
+                title=f"[视觉] {asset.title}",
+                content="[视觉证据等待分析]",
+                content_hash=asset.content_hash,
+                source_time=None,
+                mime_type=asset.mime_type,
+                storage_path=storage_path,
+                metadata_json={
+                    "visual": True,
+                    "visual_kind": asset.kind,
+                    "visual_hash": asset.content_hash,
+                    "parent_source_id": parent_source_id,
+                    "page_number": asset.page_number,
+                    "width": asset.width,
+                    "height": asset.height,
+                    "alt_text": asset.alt_text,
+                },
+            )
+            session.add(source)
+            session.flush()
+            source_id = source.id
+            _link_run_source(session, run_id, source.id)
+
+    analysis = ollama.analyze_visual(
+        topic_name=topic.name,
+        query=_topic_brief(topic),
+        source_title=asset.title,
+        source_url=asset.source_url,
+        image_bytes=asset.data,
+        visual_kind=asset.kind,
+        page_number=asset.page_number,
+        alt_text=asset.alt_text,
+    )
+
+    with session_scope() as session:
+        source = session.get(Source, source_id)
+        if not source:
+            return None
+        persisted = persist_chunk_analysis(
+            session,
+            topic_id=topic.id,
+            run_id=run_id,
+            source_id=source.id,
+            analysis=analysis,
+            origin="visual",
+        )
+        source.content = _visual_text(analysis, asset)
+        source.metadata_json = {
+            **(source.metadata_json or {}),
+            "visual": True,
+            "visual_analysis_key": cache_key,
+            "visual_analysis_model": settings.ollama_model,
+            "visual_analysis": analysis.model_dump(),
+        }
+        return _digest_from_analysis(
+            source=source,
+            analysis=analysis,
+            content_hash=asset.content_hash,
+            persisted=persisted,
+        )
+
+
 def _analysis_cache_path(topic: Topic, content_hash: str) -> Path:
     model_key = settings.ollama_model.replace("/", "_").replace(":", "_")
     prompt_key = sha256_text(f"v2|{topic.id}|{topic.name}|{topic.query}|{topic.description}|{settings.ollama_model}")[:16]
@@ -229,7 +370,7 @@ def _build_digest(items: list[dict], topic_id: int, session: Session, token_budg
     used = 0
     for idx, item in enumerate(items, start=1):
         block = (
-            f"[证据块 {idx}] 来源: {item['source_title']} | {item['source_url']}\n"
+            f"[证据块 {idx}] 类型: {item.get('evidence_type', 'text')} | 来源: {item['source_title']} | {item['source_url']}\n"
             f"Claims: {json.dumps(item['claims'], ensure_ascii=False)}\n"
             f"Entities: {json.dumps(item['entities'], ensure_ascii=False)}\n"
             f"Relations: {json.dumps(item.get('relations', []), ensure_ascii=False)}\n"
@@ -263,7 +404,7 @@ def _collect_watch_results(session: Session, topic_id: int) -> list[SearchResult
     return [SearchResult(url=w.url, title="Website watch", provider="watch") for w in watches]
 
 
-def _load_persisted_run_candidates(session: Session, run_id: int, query: str) -> tuple[list[CandidateChunk], set[str], int]:
+def _load_persisted_run_candidates(session: Session, run_id: int, query: str) -> tuple[list[CandidateChunk], set[str], int, list[dict]]:
     sources = list(
         session.scalars(
             select(Source)
@@ -274,8 +415,15 @@ def _load_persisted_run_candidates(session: Session, run_id: int, query: str) ->
     )
     candidates: list[CandidateChunk] = []
     seen_urls: set[str] = set()
+    visual_digests: list[dict] = []
     web_count = 0
     for source in sources:
+        meta = source.metadata_json or {}
+        if meta.get("visual"):
+            analysis = _load_cached_visual(source)
+            if analysis:
+                visual_digests.append(_digest_from_analysis(source=source, analysis=analysis, content_hash=source.content_hash))
+            continue
         candidates.extend(_store_chunks(session, source, query))
         if not source.url.startswith("manual://"):
             web_count += 1
@@ -283,7 +431,7 @@ def _load_persisted_run_candidates(session: Session, run_id: int, query: str) ->
                 seen_urls.add(source.url)
             if source.canonical_url:
                 seen_urls.add(source.canonical_url)
-    return candidates, seen_urls, web_count
+    return candidates, seen_urls, web_count, visual_digests
 
 
 def execute_research_run(run_id: int) -> None:
@@ -302,10 +450,12 @@ def execute_research_run(run_id: int) -> None:
     with session_scope() as session:
         run = session.get(ResearchRun, run_id)
         topic = session.get(Topic, run.topic_id)
-        all_candidates, seen_urls, source_count = _load_persisted_run_candidates(session, run_id, topic.query)
-        if all_candidates:
-            run.message = f"Resuming with {len(all_candidates)} persisted evidence chunks"
+        all_candidates, seen_urls, source_count, visual_digests = _load_persisted_run_candidates(session, run_id, topic.query)
+        digest_items.extend(visual_digests[: settings.visual_max_assets_per_run])
+        if all_candidates or visual_digests:
+            run.message = f"Resuming with {len(all_candidates)} text chunks and {len(visual_digests)} visual evidence items"
 
+    visual_used = sum(1 for item in digest_items if item.get("evidence_type") == "visual")
     pending_queries = _topic_queries(topic.query)
 
     for round_index in range(settings.max_search_rounds):
@@ -357,8 +507,31 @@ def execute_research_run(run_id: int) -> None:
                     run = session.get(ResearchRun, run_id)
                     topic = session.get(Topic, run.topic_id)
                     source = _upsert_source(session, topic.id, run.id, document)
+                    parent_source_id = source.id
                     all_candidates.extend(_store_chunks(session, source, topic.query))
                     source_count += 1
+
+                if settings.visual_enabled and visual_used < settings.visual_max_assets_per_run:
+                    try:
+                        assets = extract_visual_assets(document)
+                    except Exception as visual_exc:
+                        logger.warning("Visual extraction failed for %s: %s", result.url, visual_exc)
+                        assets = []
+                    for asset in assets:
+                        if visual_used >= settings.visual_max_assets_per_run:
+                            break
+                        try:
+                            visual_item = _process_visual_asset(
+                                topic=topic,
+                                run_id=run_id,
+                                parent_source_id=parent_source_id,
+                                asset=asset,
+                            )
+                            if visual_item:
+                                digest_items.append(visual_item)
+                                visual_used += 1
+                        except Exception as visual_exc:
+                            logger.warning("Visual analysis failed for %s: %s", asset.source_url, visual_exc)
             except Exception as exc:
                 logger.warning("Fetch failed for %s: %s", result.url, exc)
 

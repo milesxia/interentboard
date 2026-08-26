@@ -97,7 +97,7 @@ function renderSources(items) {
   $('#sources').innerHTML = items.length ? items.slice(0,30).map(s => `
     <div class="item">
       <div class="item-title">${esc(s.title || s.url)}</div>
-      <div class="meta">${esc(s.mime_type)} · ${formatDate(s.retrieved_at)} · seen ${s.seen_count}</div>
+      <div class="meta">${esc(s.mime_type)}${s.metadata_json?.visual ? ' · 视觉证据' : ''}${s.metadata_json?.page_number ? ` · PDF第${s.metadata_json.page_number}页` : ''} · ${formatDate(s.retrieved_at)} · seen ${s.seen_count}</div>
       ${s.url.startsWith('http') ? `<div class="meta"><a href="${esc(s.url)}" target="_blank" rel="noreferrer">打开来源</a></div>` : '<div class="meta">人工输入证据</div>'}
     </div>`).join('') : '<div class="meta">暂无证据。</div>';
 }

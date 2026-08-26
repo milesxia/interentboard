@@ -103,6 +103,7 @@ class SourceOut(ORMModel):
     mime_type: str
     storage_path: str
     seen_count: int
+    metadata_json: dict = Field(default_factory=dict)
 
 
 class ConflictOut(ORMModel):
