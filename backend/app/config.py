@@ -64,6 +64,13 @@ class Settings(BaseSettings):
     scheduler_minute: int = 0
     website_watch_minutes: int = 60
     max_run_retries: int = 2
+    run_heartbeat_interval_seconds: int = 15
+    run_heartbeat_ttl_seconds: int = 60
+    run_lock_ttl_seconds: int = 90
+    run_queue_marker_ttl_seconds: int = 180
+    worker_heartbeat_interval_seconds: int = 15
+    worker_heartbeat_ttl_seconds: int = 50
+    runtime_watchdog_seconds: int = 60
 
     @property
     def source_dir(self) -> Path:

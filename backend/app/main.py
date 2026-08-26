@@ -43,7 +43,8 @@ from .schemas import (
     WebsiteWatchCreate,
     WebsiteWatchOut,
 )
-from .tasks import run_research_task
+from .runtime import run_runtime_state, runtime_snapshot
+from .tasks import enqueue_run, ensure_run_enqueued, run_research_task
 from .utils import normalize_space, sha256_text
 
 logging.basicConfig(
@@ -91,22 +92,30 @@ def health() -> dict:
 
 @app.get("/api/system/status")
 def system_status() -> dict:
+    runtime = runtime_snapshot()
     with session_scope() as session:
         topic_count = session.scalar(select(func.count()).select_from(Topic)) or 0
-        active_runs = session.scalar(
-            select(func.count()).select_from(ResearchRun).where(
-                ResearchRun.status.not_in([RunStatus.COMPLETED.value, RunStatus.FAILED.value])
+        active_rows = list(
+            session.scalars(
+                select(ResearchRun).where(
+                    ResearchRun.status.not_in([RunStatus.COMPLETED.value, RunStatus.FAILED.value])
+                )
             )
-        ) or 0
+        )
         source_count = session.scalar(select(func.count()).select_from(Source)) or 0
         claim_count = session.scalar(select(func.count()).select_from(Claim)) or 0
         conflict_count = session.scalar(
             select(func.count()).select_from(Conflict).where(Conflict.status == "open")
         ) or 0
+    runtime_states = {run.id: run_runtime_state(run.id) for run in active_rows}
+    runtime["stale_run_ids"] = [run_id for run_id, state in runtime_states.items() if state == "stale"]
+    runtime["queued_run_ids"] = [run_id for run_id, state in runtime_states.items() if state == "queued"]
+    runtime["running_run_ids"] = [run_id for run_id, state in runtime_states.items() if state == "running"]
     return {
         "app": {"name": settings.app_name, "version": settings.app_version, "timezone": settings.timezone},
         "model": ollama.health(),
         "running_models": ollama.running_models(),
+        "runtime": runtime,
         "limits": {
             "context_length": settings.ollama_context_length,
             "max_search_rounds": settings.max_search_rounds,
@@ -117,13 +126,12 @@ def system_status() -> dict:
         },
         "counts": {
             "topics": topic_count,
-            "active_runs": active_runs,
+            "active_runs": len(active_rows),
             "sources": source_count,
             "claims": claim_count,
             "open_conflicts": conflict_count,
         },
     }
-
 
 @app.get("/api/dashboard")
 def dashboard() -> dict:
@@ -140,7 +148,10 @@ def dashboard() -> dict:
         topics = list(session.scalars(select(Topic).order_by(Topic.priority.desc(), Topic.name.asc())))
     return {
         "topics": [TopicOut.model_validate(x).model_dump() for x in topics],
-        "runs": [RunOut.model_validate(x).model_dump() for x in latest_runs],
+        "runs": [
+            {**RunOut.model_validate(x).model_dump(), "runtime_state": run_runtime_state(x.id, terminal=x.status in {RunStatus.COMPLETED.value, RunStatus.FAILED.value})}
+            for x in latest_runs
+        ],
         "claims": [ClaimOut.model_validate(x).model_dump() for x in latest_claims],
         "conflicts": [ConflictOut.model_validate(x).model_dump() for x in conflicts],
     }
@@ -188,12 +199,19 @@ def run_topic(topic_id: int) -> ResearchRun:
             )
         )
         if active:
-            return active
-        run = ResearchRun(topic_id=topic_id, status=RunStatus.WAITING.value, progress=0, message="Manual refresh queued")
-        session.add(run)
-        session.flush()
-        run_id = run.id
-    run_research_task.delay(run_id)
+            active_id = active.id
+            run_id = None
+        else:
+            run = ResearchRun(topic_id=topic_id, status=RunStatus.WAITING.value, progress=0, message="Manual refresh queued")
+            session.add(run)
+            session.flush()
+            run_id = run.id
+            active_id = None
+    if active_id is not None:
+        ensure_run_enqueued(active_id, reason="manual refresh")
+        with session_scope() as session:
+            return session.get(ResearchRun, active_id)
+    enqueue_run(run_id, reason="manual refresh")
     with session_scope() as session:
         return session.get(ResearchRun, run_id)
 
@@ -243,7 +261,22 @@ def retry_run(run_id: int) -> ResearchRun:
         run.message = "Manual retry queued; existing evidence and chunk cache retained"
         run.error = ""
         run.finished_at = None
-    run_research_task.delay(run_id)
+    enqueue_run(run_id, reason="manual failed-run retry")
+    with session_scope() as session:
+        return session.get(ResearchRun, run_id)
+
+
+@app.post("/api/runs/{run_id}/recover", response_model=RunOut)
+def recover_run(run_id: int) -> ResearchRun:
+    with session_scope() as session:
+        run = session.get(ResearchRun, run_id)
+        if not run:
+            raise HTTPException(404, "Run not found")
+        if run.status in {RunStatus.COMPLETED.value, RunStatus.FAILED.value}:
+            raise HTTPException(409, "Only active/stale runs can be recovered")
+    state = ensure_run_enqueued(run_id, reason="manual recovery button")
+    if state == "running":
+        raise HTTPException(409, "Run is actively processing; recovery is not needed")
     with session_scope() as session:
         return session.get(ResearchRun, run_id)
 
@@ -413,7 +446,9 @@ def create_manual_note(payload: ManualNoteCreate) -> dict:
             session.flush()
             queued_run_id = run.id
     if queued_run_id:
-        run_research_task.delay(queued_run_id)
+        enqueue_run(queued_run_id, reason="manual note")
+    elif active:
+        ensure_run_enqueued(active.id, reason="manual note found stale active run")
     return {"id": note_id, "topic_id": payload.topic_id, "title": payload.title, "priority": 100, "queued_run_id": queued_run_id}
 
 

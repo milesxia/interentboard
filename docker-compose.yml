@@ -42,6 +42,13 @@ x-app-env: &app-env
   SCHEDULER_HOUR: ${SCHEDULER_HOUR}
   SCHEDULER_MINUTE: ${SCHEDULER_MINUTE}
   WEBSITE_WATCH_MINUTES: ${WEBSITE_WATCH_MINUTES}
+  RUN_HEARTBEAT_INTERVAL_SECONDS: ${RUN_HEARTBEAT_INTERVAL_SECONDS:-15}
+  RUN_HEARTBEAT_TTL_SECONDS: ${RUN_HEARTBEAT_TTL_SECONDS:-60}
+  RUN_LOCK_TTL_SECONDS: ${RUN_LOCK_TTL_SECONDS:-90}
+  RUN_QUEUE_MARKER_TTL_SECONDS: ${RUN_QUEUE_MARKER_TTL_SECONDS:-180}
+  WORKER_HEARTBEAT_INTERVAL_SECONDS: ${WORKER_HEARTBEAT_INTERVAL_SECONDS:-15}
+  WORKER_HEARTBEAT_TTL_SECONDS: ${WORKER_HEARTBEAT_TTL_SECONDS:-50}
+  RUNTIME_WATCHDOG_SECONDS: ${RUNTIME_WATCHDOG_SECONDS:-60}
 
 services:
   postgres:
@@ -69,7 +76,7 @@ services:
     container_name: internetboard-redis
     restart: unless-stopped
     logging: *default-logging
-    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--maxmemory-policy", "noeviction"]
     environment:
       TZ: ${TZ}
     volumes:
@@ -171,6 +178,13 @@ services:
     volumes:
       - ${APP_ROOT}/data:/data
     command: ["celery", "-A", "app.tasks.celery_app", "worker", "--loglevel=INFO", "--concurrency=1", "--prefetch-multiplier=1", "--max-tasks-per-child=10"]
+    stop_grace_period: 2m
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.tasks.celery_app inspect ping -d celery@$$HOSTNAME --timeout=5 2>/dev/null | grep -q pong"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     networks: [internetboard]
 
   scheduler:

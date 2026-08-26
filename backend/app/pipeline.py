@@ -15,6 +15,7 @@ from .fetcher import FetchedDocument, archive_document, fetch_document
 from .knowledge import export_run_snapshot, persist_chunk_analysis, persist_conflicts
 from .models import Chunk, ManualNote, ResearchRun, RunEvidence, RunStatus, Source, Topic, WebsiteWatch, utcnow
 from .ollama_client import ollama
+from .runtime import touch_run
 from .schemas import ChunkAnalysis
 from .search import SearchResult, search_web
 from .utils import atomic_write_json, estimate_tokens, normalize_space, sha256_text
@@ -40,6 +41,7 @@ def _update_run(session: Session, run: ResearchRun, status: RunStatus, progress:
     run.progress = max(0, min(100, progress))
     run.message = message[:4000]
     session.flush()
+    touch_run(run.id)
 
 
 def _link_run_source(session: Session, run_id: int, source_id: int) -> None:
@@ -264,7 +266,14 @@ def _process_visual_asset(*, topic: Topic, run_id: int, parent_source_id: int, a
             source.seen_count += 1
             source.run_id = run_id
             _link_run_source(session, run_id, source.id)
-            meta = source.metadata_json or {}
+            meta = dict(source.metadata_json or {})
+            parent_ids = {int(x) for x in meta.get("parent_source_ids", []) if str(x).isdigit()}
+            if meta.get("parent_source_id"):
+                parent_ids.add(int(meta["parent_source_id"]))
+            parent_ids.add(parent_source_id)
+            meta["parent_source_ids"] = sorted(parent_ids)
+            meta["parent_source_id"] = min(parent_ids) if parent_ids else parent_source_id
+            source.metadata_json = meta
             if meta.get("visual_analysis_key") == cache_key:
                 cached = _load_cached_visual(source)
                 if cached:
@@ -288,6 +297,7 @@ def _process_visual_asset(*, topic: Topic, run_id: int, parent_source_id: int, a
                     "visual_kind": asset.kind,
                     "visual_hash": asset.content_hash,
                     "parent_source_id": parent_source_id,
+                    "parent_source_ids": [parent_source_id],
                     "page_number": asset.page_number,
                     "width": asset.width,
                     "height": asset.height,

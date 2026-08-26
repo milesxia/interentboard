@@ -25,12 +25,17 @@ const formatDate = v => v ? new Date(v).toLocaleString() : '-';
 
 function renderStats() {
   const c = state.system?.counts || {};
+  const rt = state.system?.runtime || {};
   $('#stats').innerHTML = [
-    ['专题', c.topics || 0], ['运行中', c.active_runs || 0], ['证据', c.sources || 0], ['知识 Claim', c.claims || 0], ['未解决冲突', c.open_conflicts || 0]
+    ['专题', c.topics || 0], ['运行中', c.active_runs || 0], ['队列', rt.queue_depth ?? '-'], ['僵尸任务', (rt.stale_run_ids || []).length], ['证据', c.sources || 0], ['知识 Claim', c.claims || 0], ['未解决冲突', c.open_conflicts || 0]
   ].map(([label,value]) => `<div class="stat"><strong>${value}</strong><span>${label}</span></div>`).join('');
   const m = state.system?.model || {};
   const b = $('#modelBadge');
-  if (m.ok && m.model_ready) { b.className='badge good'; b.textContent=`${m.model} 已就绪`; }
+  const rt = state.system?.runtime || {};
+  if (!rt.broker_ok) { b.className='badge bad'; b.textContent='Redis/任务队列异常'; }
+  else if (!rt.worker_online) { b.className='badge bad'; b.textContent='Worker 离线'; }
+  else if ((rt.stale_run_ids || []).length) { b.className='badge warn'; b.textContent=`Worker 在线 · ${rt.stale_run_ids.length} 个任务待恢复`; }
+  else if (m.ok && m.model_ready) { b.className='badge good'; b.textContent=`${m.model} · Worker 在线`; }
   else if (m.ok) { b.className='badge warn'; b.textContent='Ollama 在线 / 模型拉取中'; }
   else { b.className='badge bad'; b.textContent='Ollama 未就绪'; }
 }
@@ -61,7 +66,8 @@ function renderRuns() {
   $('#runs').innerHTML = runs.length ? runs.map(r => `
     <div class="item">
       <div class="item-head"><div class="item-title">Run #${r.id} · Topic ${r.topic_id}</div><span class="badge ${statusClass(r.status)}">${r.status}</span></div>
-      <div class="meta">${esc(r.message || '')}</div>
+      <div class="meta">运行态：${esc(r.runtime_state || '-')} · ${esc(r.message || '')}</div>
+      ${r.runtime_state === 'stale' ? `<div class="actions"><button onclick="recoverRun(${r.id})">恢复任务</button></div>` : ''}
       <div class="progress"><i style="width:${r.progress}%"></i></div>
       ${r.summary ? `<pre class="summary">${esc(r.summary)}</pre>` : ''}
       ${r.trend ? `<div class="insight"><b>Trend</b><span>${esc(r.trend)}</span></div>` : ''}
@@ -135,6 +141,10 @@ async function runTopic(id) {
   try { await api(`/api/topics/${id}/run`, {method:'POST'}); toast('任务已进入队列'); await load(); } catch(e) { toast(e.message); }
 }
 window.runTopic = runTopic;
+async function recoverRun(id) {
+  try { await api(`/api/runs/${id}/recover`, {method:'POST'}); toast('任务已恢复并重新进入队列'); await load(); } catch(e) { toast(e.message); }
+}
+window.recoverRun = recoverRun;
 
 function resetTopicForm() {
   const form = $('#topicForm');
@@ -210,8 +220,12 @@ $('#watchForm').addEventListener('submit', async e => {
   try { await api('/api/watches',{method:'POST',body:JSON.stringify({topic_id:Number(f.get('topic_id')),url:f.get('url'),enabled:true})}); e.currentTarget.reset(); toast('网页监测已添加'); await load(); } catch(err){ toast(err.message); }
 });
 
-load();
-setInterval(() => {
+let pollTimer = null;
+async function poll() {
+  await load();
   const active = (state.dashboard?.runs || []).some(r => !['COMPLETED','FAILED'].includes(r.status));
-  if (active) load();
-}, 10000);
+  const delay = active ? 5000 : 30000;
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(poll, delay);
+}
+poll();

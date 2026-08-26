@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import logging
+import socket
+import threading
 from datetime import timedelta
+from uuid import uuid4
 
 from celery import Celery
 from celery.schedules import crontab
+from celery.signals import worker_ready, worker_shutdown
 from sqlalchemy import select
 
 from .config import settings
@@ -12,9 +16,17 @@ from .db import init_db, session_scope
 from .fetcher import fetch_document
 from .models import ResearchRun, RunStatus, Topic, WebsiteWatch, utcnow
 from .pipeline import execute_research_run, mark_run_failed
+from .runtime import (
+    RunLease,
+    clear_run_queued,
+    clear_worker,
+    reserve_run_queue,
+    run_runtime_state,
+    set_run_queued,
+    touch_worker,
+)
 
 logger = logging.getLogger(__name__)
-
 celery_app = Celery("internetboard", broker=settings.redis_url, backend=settings.redis_url)
 celery_app.conf.update(
     timezone=settings.timezone,
@@ -23,7 +35,16 @@ celery_app.conf.update(
     task_acks_late=True,
     worker_prefetch_multiplier=1,
     task_reject_on_worker_lost=True,
+    worker_cancel_long_running_tasks_on_connection_loss=True,
     broker_connection_retry_on_startup=True,
+    broker_connection_max_retries=None,
+    broker_transport_options={
+        "visibility_timeout": 21600,
+        "health_check_interval": 25,
+        "socket_keepalive": True,
+        "retry_on_timeout": True,
+    },
+    result_backend_transport_options={"visibility_timeout": 21600},
     result_expires=86400,
     beat_schedule={
         "daily-research-0300": {
@@ -34,13 +55,126 @@ celery_app.conf.update(
             "task": "internetboard.check_website_watches",
             "schedule": timedelta(minutes=settings.website_watch_minutes),
         },
+        "runtime-watchdog": {
+            "task": "internetboard.runtime_watchdog",
+            "schedule": timedelta(seconds=settings.runtime_watchdog_seconds),
+        },
     },
 )
+
+_ACTIVE = [
+    RunStatus.WAITING.value,
+    RunStatus.SEARCHING.value,
+    RunStatus.FETCHING.value,
+    RunStatus.CHUNKING.value,
+    RunStatus.AI_ANALYSIS.value,
+    RunStatus.KNOWLEDGE_UPDATE.value,
+]
+_worker_stop = threading.Event()
+_worker_thread: threading.Thread | None = None
+
+
+def _worker_name(sender=None) -> str:
+    return str(getattr(sender, "hostname", "") or f"celery@{socket.gethostname()}")
+
+
+def _worker_heartbeat_loop(name: str) -> None:
+    while not _worker_stop.is_set():
+        touch_worker(name)
+        _worker_stop.wait(max(5, settings.worker_heartbeat_interval_seconds))
+
+
+@worker_ready.connect
+def _on_worker_ready(sender=None, **kwargs) -> None:
+    global _worker_thread
+    name = _worker_name(sender)
+    _worker_stop.clear()
+    touch_worker(name)
+    if not _worker_thread or not _worker_thread.is_alive():
+        _worker_thread = threading.Thread(target=_worker_heartbeat_loop, args=(name,), name="worker-runtime-heartbeat", daemon=True)
+        _worker_thread.start()
+    # Any task stranded by a previous worker/container restart is recovered here.
+    try:
+        recover_stale_runs_once(reason="worker startup recovery")
+    except Exception:
+        logger.exception("Runtime recovery failed during worker startup")
+
+
+@worker_shutdown.connect
+def _on_worker_shutdown(sender=None, **kwargs) -> None:
+    _worker_stop.set()
+    clear_worker()
+
+
+def enqueue_run(run_id: int, *, reason: str = "queued", ttl_seconds: int | None = None) -> str | None:
+    task_id = str(uuid4())
+    if not reserve_run_queue(run_id, task_id, ttl_seconds=ttl_seconds):
+        return None
+    try:
+        run_research_task.apply_async(args=[run_id], task_id=task_id)
+    except Exception:
+        clear_run_queued(run_id, task_id)
+        raise
+    logger.info("Research run %s queued as Celery task %s (%s)", run_id, task_id, reason)
+    return task_id
+
+
+def ensure_run_enqueued(run_id: int, *, reason: str = "runtime recovery") -> str:
+    state = run_runtime_state(run_id)
+    if state in {"running", "queued"}:
+        return state
+    with session_scope() as session:
+        run = session.get(ResearchRun, run_id)
+        if not run:
+            return "missing"
+        if run.status in {RunStatus.COMPLETED.value, RunStatus.FAILED.value}:
+            return "terminal"
+        previous = run.status
+        run.status = RunStatus.WAITING.value
+        run.message = f"Recovered stale {previous} task; re-queued automatically ({reason})"
+        run.error = ""
+        run.finished_at = None
+    task_id = enqueue_run(run_id, reason=reason)
+    return "requeued" if task_id else run_runtime_state(run_id)
+
+
+def recover_stale_runs_once(*, reason: str = "watchdog") -> dict:
+    init_db()
+    with session_scope() as session:
+        active_ids = list(session.scalars(select(ResearchRun.id).where(ResearchRun.status.in_(_ACTIVE))))
+    recovered: list[int] = []
+    live: list[int] = []
+    queued: list[int] = []
+    for run_id in active_ids:
+        state = run_runtime_state(run_id)
+        if state == "running":
+            live.append(run_id)
+            continue
+        if state == "queued":
+            queued.append(run_id)
+            continue
+        result = ensure_run_enqueued(run_id, reason=reason)
+        if result == "requeued":
+            recovered.append(run_id)
+    return {"active": active_ids, "live": live, "queued": queued, "recovered": recovered}
 
 
 @celery_app.task(name="internetboard.run_research", bind=True, max_retries=settings.max_run_retries)
 def run_research_task(self, run_id: int) -> dict:
     init_db()
+    task_id = str(self.request.id or uuid4())
+    clear_run_queued(run_id, task_id)
+    with session_scope() as session:
+        run = session.get(ResearchRun, run_id)
+        if not run:
+            return {"run_id": run_id, "status": "MISSING"}
+        if run.status in {RunStatus.COMPLETED.value, RunStatus.FAILED.value}:
+            logger.info("Skipping terminal run %s status=%s task=%s", run_id, run.status, task_id)
+            return {"run_id": run_id, "status": run.status, "skipped": True}
+    lease = RunLease(run_id=run_id, token=task_id, worker_name=f"celery@{socket.gethostname()}")
+    if not lease.acquire():
+        logger.warning("Skipping duplicate execution for run %s task=%s because another lease is active", run_id, task_id)
+        return {"run_id": run_id, "status": "DUPLICATE_SKIPPED"}
     try:
         execute_research_run(run_id)
         return {"run_id": run_id, "status": "COMPLETED"}
@@ -55,46 +189,51 @@ def run_research_task(self, run_id: int) -> dict:
                 retry_count = settings.max_run_retries + 1
         mark_run_failed(run_id, str(exc))
         if retry_count <= settings.max_run_retries:
+            countdown = min(600, 60 * (2**retry_count))
             with session_scope() as session:
                 run = session.get(ResearchRun, run_id)
                 if run:
                     run.status = RunStatus.WAITING.value
                     run.message = f"Retry scheduled after failure ({retry_count}/{settings.max_run_retries})"
                     run.finished_at = None
-            raise self.retry(exc=exc, countdown=min(600, 60 * (2**retry_count)))
+            set_run_queued(run_id, task_id, ttl_seconds=countdown + settings.run_queue_marker_ttl_seconds)
+            raise self.retry(exc=exc, countdown=countdown)
         raise
+    finally:
+        lease.release()
+
+
+@celery_app.task(name="internetboard.runtime_watchdog")
+def runtime_watchdog() -> dict:
+    return recover_stale_runs_once(reason="periodic watchdog")
 
 
 @celery_app.task(name="internetboard.run_all_topics")
 def run_all_topics() -> dict:
     init_db()
-    queued: list[int] = []
+    queued_ids: list[int] = []
+    existing_ids: list[int] = []
     with session_scope() as session:
         topics = list(session.scalars(select(Topic).where(Topic.enabled.is_(True)).order_by(Topic.priority.desc())))
         for topic_row in topics:
             topic = session.scalar(select(Topic).where(Topic.id == topic_row.id).with_for_update())
-            active = session.scalar(
-                select(ResearchRun).where(
-                    ResearchRun.topic_id == topic.id,
-                    ResearchRun.status.in_([
-                        RunStatus.WAITING.value,
-                        RunStatus.SEARCHING.value,
-                        RunStatus.FETCHING.value,
-                        RunStatus.CHUNKING.value,
-                        RunStatus.AI_ANALYSIS.value,
-                        RunStatus.KNOWLEDGE_UPDATE.value,
-                    ]),
-                )
-            )
+            active = session.scalar(select(ResearchRun).where(ResearchRun.topic_id == topic.id, ResearchRun.status.in_(_ACTIVE)))
             if active:
+                existing_ids.append(active.id)
                 continue
             run = ResearchRun(topic_id=topic.id, status=RunStatus.WAITING.value, progress=0, message="Daily scheduled run")
             session.add(run)
             session.flush()
-            queued.append(run.id)
-    for run_id in queued:
-        run_research_task.delay(run_id)
-    return {"queued": queued}
+            queued_ids.append(run.id)
+    queued: list[int] = []
+    recovered: list[int] = []
+    for run_id in queued_ids:
+        if enqueue_run(run_id, reason="daily schedule"):
+            queued.append(run_id)
+    for run_id in existing_ids:
+        if ensure_run_enqueued(run_id, reason="daily schedule found stale active run") == "requeued":
+            recovered.append(run_id)
+    return {"queued": queued, "recovered": recovered}
 
 
 @celery_app.task(name="internetboard.check_website_watches")
@@ -104,7 +243,6 @@ def check_website_watches() -> dict:
     checked = 0
     with session_scope() as session:
         watches = list(session.scalars(select(WebsiteWatch).where(WebsiteWatch.enabled.is_(True))))
-
     for watch in watches:
         try:
             doc = fetch_document(watch.url)
@@ -121,25 +259,27 @@ def check_website_watches() -> dict:
                     changed_topics.add(current.topic_id)
         except Exception as exc:
             logger.warning("Website watch failed %s: %s", watch.url, exc)
-
-    queued: list[int] = []
+    new_ids: list[int] = []
+    existing_ids: list[int] = []
     with session_scope() as session:
         for topic_id in changed_topics:
             topic = session.scalar(select(Topic).where(Topic.id == topic_id).with_for_update())
             if not topic:
                 continue
-            active = session.scalar(
-                select(ResearchRun).where(
-                    ResearchRun.topic_id == topic_id,
-                    ResearchRun.status.not_in([RunStatus.COMPLETED.value, RunStatus.FAILED.value]),
-                )
-            )
+            active = session.scalar(select(ResearchRun).where(ResearchRun.topic_id == topic_id, ResearchRun.status.in_(_ACTIVE)))
             if active:
+                existing_ids.append(active.id)
                 continue
             run = ResearchRun(topic_id=topic_id, status=RunStatus.WAITING.value, progress=0, message="Website change detected")
             session.add(run)
             session.flush()
-            queued.append(run.id)
-    for run_id in queued:
-        run_research_task.delay(run_id)
-    return {"checked": checked, "changed_topics": sorted(changed_topics), "queued": queued}
+            new_ids.append(run.id)
+    queued: list[int] = []
+    recovered: list[int] = []
+    for run_id in new_ids:
+        if enqueue_run(run_id, reason="website change"):
+            queued.append(run_id)
+    for run_id in existing_ids:
+        if ensure_run_enqueued(run_id, reason="website watch found stale active run") == "requeued":
+            recovered.append(run_id)
+    return {"checked": checked, "changed_topics": sorted(changed_topics), "queued": queued, "recovered": recovered}

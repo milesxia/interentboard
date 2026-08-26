@@ -107,3 +107,10 @@ sh restore.sh /path/to/internetboard-YYYYMMDD-HHMMSS.tgz
 Only the Nginx frontend port is published. PostgreSQL, Redis, backend API, and Ollama remain on the private Compose network. The trusted-LAN profile has no application-level API key; use reverse-proxy/VPN access control before any Internet exposure. Docker logs are rotated (`20m x 3` per service). The generated `.env` contains secrets and must not be published.
 
 For Internet exposure, place the dashboard behind a QNAP reverse proxy with HTTPS and additional access controls. The default package is intended for trusted LAN/VPN access.
+
+
+## Runtime self-healing
+
+InternetBoard uses a Redis-backed per-run lease, queue marker and heartbeat. A duplicate Celery delivery cannot execute the same research run concurrently. If a worker/container or broker connection is interrupted, the worker-start recovery hook and periodic watchdog re-queue stale active runs without creating a new research history record. The dashboard shows worker state, queue depth and stale-run recovery controls.
+
+`doctor.sh` also checks Docker Hub DNS/HTTPS, Redis queue depth, Celery worker ping, `vm.overcommit_memory`, GPU visibility and Ollama processor split.
