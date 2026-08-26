@@ -1,94 +1,73 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "3"
+
 services:
-  # 主程序：搜索、知识库、前端、定时任务
-  internetboard:
-    image: ${INTERNETBOARD_IMAGE:-milesxia/internetboard:latest}
-    container_name: internetboard
+  postgres:
+    logging: *default-logging
+    image: postgres:16-alpine
+    container_name: internetboard-postgres
     restart: unless-stopped
-    pull_policy: always
-    depends_on:
-      ollama:
-        condition: service_healthy
-    ports:
-      - "${HOST_PORT:-8733}:8080"
-    volumes:
-      - /share/Container/internetboard/data:/app/data
     environment:
-      TZ: ${TZ:-Asia/Shanghai}
-      DATA_DIR: /app/data
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me-now}
-      SESSION_SECRET: ${SESSION_SECRET:-please-change-this-session-secret}
-      SESSION_HTTPS_ONLY: ${SESSION_HTTPS_ONLY:-false}
+      TZ: ${TZ}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    command:
+      - postgres
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - effective_cache_size=1GB
+      - -c
+      - max_connections=50
+    volumes:
+      - ${APP_ROOT}/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [internetboard]
 
-      # 27B 只做最终判断；2.5GB 4B 文本模型负责大量分块提炼
-      OLLAMA_BASE_URL: http://ollama:11434
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.8:27b-q4_K_M}
-      OLLAMA_EXTRACT_MODEL: ${OLLAMA_EXTRACT_MODEL:-qwen3:4b-instruct-2507-q4_K_M}
-      AUTO_PULL_MODEL: ${AUTO_PULL_MODEL:-true}
-      OLLAMA_NUM_CTX: ${OLLAMA_NUM_CTX:-8192}
-      OLLAMA_NUM_GPU: ${OLLAMA_NUM_GPU:-4}
-      OLLAMA_EXTRACT_NUM_GPU: ${OLLAMA_EXTRACT_NUM_GPU:-99}
-      OLLAMA_NUM_THREAD: ${OLLAMA_NUM_THREAD:-6}
-      OLLAMA_EXTRACT_NUM_THREAD: ${OLLAMA_EXTRACT_NUM_THREAD:-4}
-      OLLAMA_FINAL_THINK: ${OLLAMA_FINAL_THINK:-medium}
+  redis:
+    logging: *default-logging
+    image: redis:7.4-alpine
+    container_name: internetboard-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    environment:
+      TZ: ${TZ}
+    volumes:
+      - ${APP_ROOT}/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [internetboard]
 
-      # 分块→提炼→融合→最终推理；应用端禁止静默截断
-      AI_CHUNK_TOKENS: ${AI_CHUNK_TOKENS:-2400}
-      AI_CHUNK_OVERLAP_TOKENS: ${AI_CHUNK_OVERLAP_TOKENS:-180}
-      AI_EXTRACT_PREDICT: ${AI_EXTRACT_PREDICT:-320}
-      AI_REDUCE_TOKENS: ${AI_REDUCE_TOKENS:-3200}
-      AI_REDUCE_PREDICT: ${AI_REDUCE_PREDICT:-500}
-      AI_FINAL_TOKENS: ${AI_FINAL_TOKENS:-5000}
-      AI_FINAL_PREDICT: ${AI_FINAL_PREDICT:-1200}
-      MAX_HISTORY_CLAIMS: ${MAX_HISTORY_CLAIMS:-60}
-      BACKFILL_EVIDENCE_PER_RUN: ${BACKFILL_EVIDENCE_PER_RUN:-3}
-
-      # 长期知识检索：小知识库先用关键词/FTS；达到阈值后按需启用语义向量
-      OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-qwen3-embedding:0.6b}
-      ENABLE_EMBEDDINGS: ${ENABLE_EMBEDDINGS:-true}
-      SEMANTIC_RAG_MIN_CLAIMS: ${SEMANTIC_RAG_MIN_CLAIMS:-200}
-      EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-24}
-      SEMANTIC_CANDIDATE_LIMIT: ${SEMANTIC_CANDIDATE_LIMIT:-80}
-
-      # 有限二次补搜 + 持久任务队列；NAS重启后可从断点继续
-      ENABLE_GAP_SEARCH: ${ENABLE_GAP_SEARCH:-true}
-      MAX_FOLLOWUP_QUERIES: ${MAX_FOLLOWUP_QUERIES:-2}
-      QUEUE_POLL_SECONDS: ${QUEUE_POLL_SECONDS:-2}
-      QUEUE_MAX_ATTEMPTS: ${QUEUE_MAX_ATTEMPTS:-3}
-      AUTO_BACKUP_KEEP: ${AUTO_BACKUP_KEEP:-7}
-
-      SCHEDULE_HOUR: "3"
-      SCHEDULE_MINUTE: "0"
-      MAX_FETCH_CONCURRENCY: ${MAX_FETCH_CONCURRENCY:-3}
-      MAX_SEARCH_RESULTS: ${MAX_SEARCH_RESULTS:-8}
-      MAX_CANDIDATES_PER_TOPIC: ${MAX_CANDIDATES_PER_TOPIC:-20}
-      REQUEST_TIMEOUT: ${REQUEST_TIMEOUT:-25}
-      SEARXNG_URL: ${SEARXNG_URL:-}
-      ARCHIVE_FULLTEXT: ${ARCHIVE_FULLTEXT:-true}
-    mem_limit: ${APP_MEMORY_LIMIT:-3g}
-    networks:
-      - internetboard-net
-
-  # 本地推理：同一时间只驻留一个模型，避免40GB内存被双模型同时占满
   ollama:
-    image: ollama/ollama:latest
+    logging: *default-logging
+    image: ollama/ollama:0.32.13
     container_name: internetboard-ollama
     restart: unless-stopped
-    pull_policy: always
-    volumes:
-      - /share/Container/internetboard/ollama:/root/.ollama
     environment:
-      OLLAMA_HOST: 0.0.0.0
-      OLLAMA_KEEP_ALIVE: 10m
+      TZ: ${TZ}
+      OLLAMA_HOST: 0.0.0.0:11434
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE}
+      OLLAMA_CONTEXT_LENGTH: ${OLLAMA_CONTEXT_LENGTH}
       OLLAMA_NUM_PARALLEL: "1"
       OLLAMA_MAX_LOADED_MODELS: "1"
-      OLLAMA_MAX_QUEUE: "64"
-      OLLAMA_CONTEXT_LENGTH: ${OLLAMA_NUM_CTX:-8192}
-      OLLAMA_FLASH_ATTENTION: "1"
+      OLLAMA_MAX_QUEUE: "32"
+      OLLAMA_FLASH_ATTENTION: "true"
       OLLAMA_KV_CACHE_TYPE: q8_0
-      OLLAMA_GPU_OVERHEAD: ${OLLAMA_GPU_OVERHEAD:-402653184}
+      OLLAMA_LOAD_TIMEOUT: 20m
       NVIDIA_VISIBLE_DEVICES: all
-    # 给QTS永久留出系统内存，避免AI把整台NAS拖死
-    mem_limit: ${OLLAMA_MEMORY_LIMIT:-30g}
+    volumes:
+      - ${APP_ROOT}/ollama:/root/.ollama
     deploy:
       resources:
         reservations:
@@ -98,14 +77,125 @@ services:
               capabilities: [gpu]
     healthcheck:
       test: ["CMD", "ollama", "list"]
-      interval: 15s
+      interval: 20s
+      timeout: 10s
+      retries: 30
+      start_period: 30s
+    networks: [internetboard]
+
+  model-init:
+    logging: *default-logging
+    image: ollama/ollama:0.32.13
+    container_name: internetboard-model-init
+    restart: "no"
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL}
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["ollama pull \"$${OLLAMA_MODEL}\""]
+    networks: [internetboard]
+
+  backend:
+    logging: *default-logging
+    build:
+      context: ./backend
+    image: internetboard/backend:1.0.0
+    container_name: internetboard-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+      model-init:
+        condition: service_completed_successfully
+    environment: &app-env
+      TZ: ${TZ}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/0
+      API_KEY: ${INTERNETBOARD_API_KEY}
+      DATA_DIR: /data
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL}
+      OLLAMA_CONTEXT_LENGTH: ${OLLAMA_CONTEXT_LENGTH}
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE}
+      OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS}
+      OLLAMA_JSON_RETRIES: ${OLLAMA_JSON_RETRIES}
+      MAX_SEARCH_ROUNDS: ${MAX_SEARCH_ROUNDS}
+      MAX_RESULTS_PER_QUERY: ${MAX_RESULTS_PER_QUERY}
+      MAX_SOURCES_PER_RUN: ${MAX_SOURCES_PER_RUN}
+      MAX_TOTAL_AI_CHUNKS: ${MAX_TOTAL_AI_CHUNKS}
+      MAX_AI_CHUNKS_PER_SOURCE: ${MAX_AI_CHUNKS_PER_SOURCE}
+      CHUNK_CHARS: ${CHUNK_CHARS}
+      CHUNK_OVERLAP_CHARS: ${CHUNK_OVERLAP_CHARS}
+      ALLOW_PRIVATE_URLS: ${ALLOW_PRIVATE_URLS}
+      SEARXNG_URL: ${SEARXNG_URL}
+      SCHEDULER_HOUR: ${SCHEDULER_HOUR}
+      SCHEDULER_MINUTE: ${SCHEDULER_MINUTE}
+      WEBSITE_WATCH_MINUTES: ${WEBSITE_WATCH_MINUTES}
+    volumes:
+      - ${APP_ROOT}/data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 20s
       timeout: 10s
       retries: 20
       start_period: 30s
-    networks:
-      - internetboard-net
+    networks: [internetboard]
+
+  worker:
+    logging: *default-logging
+    image: internetboard/backend:1.0.0
+    container_name: internetboard-worker
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment: *app-env
+    volumes:
+      - ${APP_ROOT}/data:/data
+    command: ["celery", "-A", "app.tasks.celery_app", "worker", "--loglevel=INFO", "--concurrency=1", "--prefetch-multiplier=1", "--max-tasks-per-child=10"]
+    networks: [internetboard]
+
+  scheduler:
+    logging: *default-logging
+    image: internetboard/backend:1.0.0
+    container_name: internetboard-scheduler
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment: *app-env
+    volumes:
+      - ${APP_ROOT}/data:/data
+    command: ["celery", "-A", "app.tasks.celery_app", "beat", "--loglevel=INFO", "--schedule=/data/celerybeat-schedule"]
+    networks: [internetboard]
+
+  frontend:
+    logging: *default-logging
+    build:
+      context: ./frontend
+    image: internetboard/frontend:1.0.0
+    container_name: internetboard-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${WEB_PORT}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/health >/dev/null || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+    networks: [internetboard]
 
 networks:
-  internetboard-net:
-    name: internetboard-net
+  internetboard:
+    name: internetboard
     driver: bridge

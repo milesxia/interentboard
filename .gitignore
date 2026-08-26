@@ -1,8 +1,10 @@
+.env
+.env.local
 .venv/
 __pycache__/
-.pytest_cache/
-*.pyc
-.env
-data/
-*.zip
-.DS_Store
+*.py[cod]
+*.log
+backups/
+postgres/
+redis/
+ollama/

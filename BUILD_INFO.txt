@@ -1,0 +1,11 @@
+InternetBoard v1.0.0 Production
+Release date: 2026-08-25
+Target: QNAP TS-673A / Ryzen V1500B / 40GB RAM / NVIDIA GTX 1650 4GB
+Install root: /share/Container/internetboard
+Model: qwen3.8:27b-q4_K_M
+Ollama: 0.32.13
+Context: 8192
+Parallel inference: 1
+Loaded models: 1
+Release checks: PASS
+Physical QNAP/GPU execution: enforced by install.sh on target because the packaging runtime has no Docker/QNAP GPU.

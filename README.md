@@ -1,82 +1,101 @@
-# InternetBoard 0.4.0
+# InternetBoard v1.0 Production
 
-面向 QNAP NAS 长期运行的本地 AI 情报 / 知识系统。v0.4 重点把“自动搜新闻后总结”升级为可恢复、可追溯、会积累、会二次补搜的长期研究流水线。
+InternetBoard is a local research agent and long-term knowledge system for a QNAP TS-673A class NAS.
 
-## v0.4 核心能力
+Production profile in this package:
 
-- **完整性优先**：长文按段落切块并重叠，应用端控制 token；Ollama 请求 `truncate=false`，不允许静默丢掉后半段。
-- **分层模型**：Qwen3 4B 负责大量证据提取 / 融合 / 搜索缺口判断；Qwen3.8 27B 只做最终判断和预测。
-- **持久任务队列**：刷新、人工知识处理都进入 SQLite 队列；NAS / 容器重启后恢复排队，已完成 chunk 不重算。
-- **运行步骤账本**：搜索、抓取、提取、补搜、综合分析都记录进度和状态。
-- **二次补搜**：首轮证据提取后，4B 判断仍缺哪些关键证据，最多自动追加 2 条精确查询。
-- **页面变化检测**：同一 URL 再次出现时比较新旧版本；小改动只分析新增/变化部分，同时保留完整新版本。
-- **转载 / 镜像识别**：内容哈希 + SimHash 识别重复和近重复文章，同源转载不会被误算成多份独立证据。
-- **长期 Claim 知识库**：事实、计划、预测、传闻拆成独立 Claim，记录来源、时间、确定性、实体、可信度。
-- **知识生命周期**：自动记录 supports / conflicts / supersedes / duplicate；旧知识不删除，只标记被替代。
-- **人工知识自动入库**：粘贴新闻或手打情报后自动保存原文、AI 提炼并写入长期知识库。
-- **人工修改最高优先**：Claim 可编辑 / 删除 / 查看版本；`human_override` 不会被 AI 自动覆盖。
-- **混合历史检索**：关键词规则 + SQLite FTS + 可选语义向量；知识量达到门槛后按需启用 `qwen3-embedding:0.6b`。
-- **增量分析**：没有新证据、没有到期节点时跳过 27B 重复推理。
-- **搜索健康管理**：记录每个引擎耗时 / 成功率；连续故障自动短时熔断，避免一个失败引擎拖慢整轮任务。
-- **持久性能指标**：记录模型用途、prompt / generation tokens、t/s、GPU 层、耗时和成功率。
-- **实时状态**：前端使用 SSE 获取任务状态，断开时自动回退轮询。
-- **自动备份**：每天 03:00 正式任务前创建 SQLite 一致性备份，默认保留最近 7 份。
-- **NAS 保护**：Ollama 30GB、主程序 3GB 的默认内存上限；AI 并发 1，保证 QTS 有资源余量。
+- Host: QNAP TS-673A, AMD Ryzen Embedded V1500B, 40 GB RAM, NVIDIA GTX 1650 4 GB.
+- Deployment root: `/share/Container/internetboard`.
+- Runtime: Docker Compose / QNAP Container Station.
+- AI: exactly one model, `qwen3.8:27b-q4_K_M`, served by `ollama/ollama:0.32.13`.
+- Inference profile: one parallel request, one loaded model, 8192 context, Flash Attention, q8_0 KV cache, automatic CPU/RAM + NVIDIA partial GPU offload.
+- Web port: `8788` by default.
 
-## 默认模型
+## Install
+
+QNAP prerequisites:
+
+1. Container Station is installed and Docker Compose is available.
+2. The QNAP NVIDIA driver/NvKernelDriver packages are installed.
+3. The GTX 1650 is assigned to Container Station.
+4. At least 35 GB RAM and 35 GB free space under `/share/Container` are available.
+5. The NAS can reach Docker registries, Ollama model storage, and the public web sources you want to research.
+
+Extract this package anywhere under a QNAP share, enter the extracted directory, and run:
+
+```sh
+sh install.sh
+```
+
+`install.sh` copies the release to `/share/Container/internetboard` if necessary, preserves an existing `.env`, validates Compose, builds the application images, verifies NVIDIA visibility, pulls the exact Qwen3.8 model, runs a schema-constrained AI request, verifies actual GPU participation, and checks the final HTTP health endpoint. It stops with a non-zero exit code if a production requirement is not met.
+
+After a successful install:
 
 ```text
-证据提取 / 融合 / 搜索缺口：qwen3:4b-instruct-2507-q4_K_M
-最终分析：qwen3.8:27b-q4_K_M
-语义向量（达到阈值后按需）：qwen3-embedding:0.6b
+http://NAS-IP:8788
 ```
 
-## 持久化目录
+The generated API key is stored in `.env` and printed once at the end of installation. The browser dashboard asks for that key and stores it in browser local storage.
 
-```text
-/share/Container/internetboard/data
-/share/Container/internetboard/ollama
+## Core behavior
+
+Research runs use the following durable stages:
+
+`WAITING -> SEARCHING -> FETCHING -> CHUNKING -> AI_ANALYSIS -> KNOWLEDGE_UPDATE -> COMPLETED`
+
+A failure changes the run to `FAILED` while preserving evidence, chunks, AI chunk caches, and database state. Retrying a failed run first reconstructs candidates from persisted `RunEvidence` instead of depending on a fresh search result.
+
+The knowledge layer contains Source, Chunk, Claim, Entity, Relation, Version, Conflict, RunEvidence, ClaimEvidence, ManualNote, and WebsiteWatch records. Raw HTML/PDF/text evidence is archived under `data/source`; structured chunk analysis is cached under `data/chunk`; knowledge snapshots are written under `data/knowledge`; version files are written under `data/history`; conflict snapshots are written under `data/conflict`.
+
+Human priority policy:
+
+- 100: human confirmed / manual evidence
+- 80: human modified
+- 50: AI-supported fact
+- 20: AI inference
+
+AI updates do not silently overwrite a higher-priority human value. Conflicts remain explicit until resolved.
+
+## Search and evidence
+
+The built-in search chain is:
+
+1. Optional SearXNG JSON endpoint if `SEARXNG_URL` is configured.
+2. DuckDuckGo HTML results.
+3. Bing News RSS fallback.
+
+No external search API key is required for the default profile, but public search providers can rate-limit or block automated traffic. For a controlled long-running deployment, set `SEARXNG_URL` to a SearXNG instance you operate.
+
+Fetch safety includes private/local-address blocking by default, validation of each HTTP redirect before following it, a 25 MB document cap, unsupported binary MIME rejection, and prompt-injection instructions that treat fetched evidence as untrusted data. Set `ALLOW_PRIVATE_URLS=true` only if you intentionally need to monitor intranet URLs.
+
+PDFs with little or no extractable text are still archived as raw evidence, but they do not produce useful chunks until text is available. v1.0 intentionally does not add a second OCR or embedding model.
+
+## Single-model rule and vector directory
+
+`data/vector` is reserved for forward compatibility. v1.0 does not introduce an embedding model because the architecture is locked to a single Qwen3.8-27B AI model. Retrieval in v1.0 uses topic-scoped persisted sources/chunks, lexical chunk relevance, claims, entities, relations, and evidence links.
+
+## Scheduling
+
+Default schedule:
+
+- Daily research: 03:00, `Asia/Shanghai`.
+- Website change checks: every 60 minutes.
+- Celery worker concurrency: 1.
+
+All values can be adjusted in `.env`, but the included defaults are the tested static production profile for the specified 40 GB / GTX 1650 host.
+
+## Operations
+
+```sh
+sh doctor.sh
+sh backup.sh
+sh restore.sh /path/to/internetboard-YYYYMMDD-HHMMSS.tgz
 ```
 
-数据库继续使用：
+`doctor.sh` reports container state, host/container GPU visibility, Ollama model state, processor split, health, and recent logs. `backup.sh` exports PostgreSQL plus the durable evidence/knowledge tree and configuration. `restore.sh` stops application services, restores data and PostgreSQL, and retains the previous data directory as `data.restore`.
 
-```text
-/share/Container/internetboard/data/intelboard.db
-```
+## Security notes
 
-升级不会删除原有 v0.2 / v0.3 数据；启动时自动执行增量数据库迁移。
+Only the Nginx frontend port is published. PostgreSQL, Redis, backend API, and Ollama remain on the private Compose network. Protected `/api/*` routes require `X-API-Key`. Docker logs are rotated (`20m x 3` per service). The generated `.env` contains secrets and must not be published.
 
-## 核心流水线
-
-```text
-联网搜索 / 人工输入
-        ↓
-保存原始全文 + 抓取元数据
-        ↓
-URL规范化 / 转载识别 / 页面版本变化
-        ↓
-按段落切块 + 完整性账本
-        ↓
-Qwen3 4B：逐块事实提取
-        ↓
-Claim 长期知识库
-        ↓
-首轮知识缺口判断 → 有价值时二次补搜
-        ↓
-关键词 + FTS + 语义向量混合检索历史知识
-        ↓
-Qwen3.8 27B：最终阶段 / 风险 / 趋势 / 预测
-        ↓
-知识关系更新 + 时间线 + 下一观察节点
-```
-
-## 测试
-
-```bash
-PYTHONPATH=. MOCK_AI=true AUTO_PULL_MODEL=false pytest -q
-PYTHONPATH=. MOCK_AI=true AUTO_PULL_MODEL=false python scripts/smoke_test.py
-```
-
-## 参考方向
-
-架构设计吸收了 Local Deep Research 的持久任务 / 指标 / 研究状态思路、GPT Researcher 的多阶段与反思补搜、RAGFlow 的混合知识检索、changedetection.io 的变化检测、ArchiveBox 的原始证据归档和 Perplexica 的多源搜索思路；InternetBoard 的代码和数据结构按本项目长期专题跟踪需求重新实现。
+For Internet exposure, place the dashboard behind a QNAP reverse proxy with HTTPS and additional access controls. The default package is intended for trusted LAN/VPN access.
