@@ -3,12 +3,14 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, Query
-from fastapi.responses import ORJSONResponse
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse, ORJSONResponse
 from sqlalchemy import func, select, text
 
+from .bootstrap import bootstrap_defaults_once
 from .config import settings
 from .db import engine, init_db, session_scope
+from .handoff import build_handoff_markdown
 from .knowledge import record_version
 from .models import (
     Claim,
@@ -41,7 +43,6 @@ from .schemas import (
     WebsiteWatchCreate,
     WebsiteWatchOut,
 )
-from .security import require_api_key
 from .tasks import run_research_task
 from .utils import normalize_space, sha256_text
 
@@ -55,6 +56,8 @@ logger = logging.getLogger("internetboard")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    bootstrap = bootstrap_defaults_once()
+    logger.info("Default topic bootstrap: %s", bootstrap)
     logger.info("InternetBoard %s started", settings.app_version)
     yield
 
@@ -86,7 +89,7 @@ def health() -> dict:
     return ORJSONResponse(status_code=200 if payload["ok"] else 503, content=payload)
 
 
-@app.get("/api/system/status", dependencies=[Depends(require_api_key)])
+@app.get("/api/system/status")
 def system_status() -> dict:
     with session_scope() as session:
         topic_count = session.scalar(select(func.count()).select_from(Topic)) or 0
@@ -120,7 +123,7 @@ def system_status() -> dict:
     }
 
 
-@app.get("/api/dashboard", dependencies=[Depends(require_api_key)])
+@app.get("/api/dashboard")
 def dashboard() -> dict:
     with session_scope() as session:
         latest_runs = list(session.scalars(select(ResearchRun).order_by(ResearchRun.created_at.desc()).limit(20)))
@@ -141,13 +144,13 @@ def dashboard() -> dict:
     }
 
 
-@app.get("/api/topics", dependencies=[Depends(require_api_key)], response_model=list[TopicOut])
+@app.get("/api/topics", response_model=list[TopicOut])
 def list_topics() -> list[Topic]:
     with session_scope() as session:
         return list(session.scalars(select(Topic).order_by(Topic.priority.desc(), Topic.id.asc())))
 
 
-@app.post("/api/topics", dependencies=[Depends(require_api_key)], response_model=TopicOut)
+@app.post("/api/topics", response_model=TopicOut)
 def create_topic(payload: TopicCreate) -> Topic:
     with session_scope() as session:
         if session.scalar(select(Topic).where(Topic.name == payload.name)):
@@ -158,7 +161,7 @@ def create_topic(payload: TopicCreate) -> Topic:
         return topic
 
 
-@app.patch("/api/topics/{topic_id}", dependencies=[Depends(require_api_key)], response_model=TopicOut)
+@app.patch("/api/topics/{topic_id}", response_model=TopicOut)
 def update_topic(topic_id: int, payload: TopicUpdate) -> Topic:
     with session_scope() as session:
         topic = session.get(Topic, topic_id)
@@ -170,7 +173,7 @@ def update_topic(topic_id: int, payload: TopicUpdate) -> Topic:
         return topic
 
 
-@app.post("/api/topics/{topic_id}/run", dependencies=[Depends(require_api_key)], response_model=RunOut)
+@app.post("/api/topics/{topic_id}/run", response_model=RunOut)
 def run_topic(topic_id: int) -> ResearchRun:
     with session_scope() as session:
         topic = session.scalar(select(Topic).where(Topic.id == topic_id).with_for_update())
@@ -193,7 +196,7 @@ def run_topic(topic_id: int) -> ResearchRun:
         return session.get(ResearchRun, run_id)
 
 
-@app.get("/api/runs", dependencies=[Depends(require_api_key)], response_model=list[RunOut])
+@app.get("/api/runs", response_model=list[RunOut])
 def list_runs(topic_id: int | None = None, limit: int = Query(default=50, ge=1, le=200)) -> list[ResearchRun]:
     with session_scope() as session:
         stmt = select(ResearchRun).order_by(ResearchRun.created_at.desc()).limit(limit)
@@ -202,7 +205,7 @@ def list_runs(topic_id: int | None = None, limit: int = Query(default=50, ge=1, 
         return list(session.scalars(stmt))
 
 
-@app.get("/api/runs/{run_id}", dependencies=[Depends(require_api_key)], response_model=RunOut)
+@app.get("/api/runs/{run_id}", response_model=RunOut)
 def get_run(run_id: int) -> ResearchRun:
     with session_scope() as session:
         run = session.get(ResearchRun, run_id)
@@ -211,7 +214,7 @@ def get_run(run_id: int) -> ResearchRun:
         return run
 
 
-@app.get("/api/runs/{run_id}/evidence", dependencies=[Depends(require_api_key)], response_model=list[SourceOut])
+@app.get("/api/runs/{run_id}/evidence", response_model=list[SourceOut])
 def get_run_evidence(run_id: int) -> list[Source]:
     with session_scope() as session:
         if not session.get(ResearchRun, run_id):
@@ -225,7 +228,7 @@ def get_run_evidence(run_id: int) -> list[Source]:
         return list(session.scalars(stmt))
 
 
-@app.post("/api/runs/{run_id}/retry", dependencies=[Depends(require_api_key)], response_model=RunOut)
+@app.post("/api/runs/{run_id}/retry", response_model=RunOut)
 def retry_run(run_id: int) -> ResearchRun:
     with session_scope() as session:
         run = session.get(ResearchRun, run_id)
@@ -243,7 +246,7 @@ def retry_run(run_id: int) -> ResearchRun:
         return session.get(ResearchRun, run_id)
 
 
-@app.get("/api/sources", dependencies=[Depends(require_api_key)], response_model=list[SourceOut])
+@app.get("/api/sources", response_model=list[SourceOut])
 def list_sources(topic_id: int | None = None, limit: int = Query(default=100, ge=1, le=500)) -> list[Source]:
     with session_scope() as session:
         stmt = select(Source).order_by(Source.retrieved_at.desc()).limit(limit)
@@ -252,7 +255,7 @@ def list_sources(topic_id: int | None = None, limit: int = Query(default=100, ge
         return list(session.scalars(stmt))
 
 
-@app.get("/api/sources/{source_id}", dependencies=[Depends(require_api_key)])
+@app.get("/api/sources/{source_id}")
 def get_source(source_id: int) -> dict:
     with session_scope() as session:
         source = session.get(Source, source_id)
@@ -273,7 +276,7 @@ def get_source(source_id: int) -> dict:
         }
 
 
-@app.get("/api/claims", dependencies=[Depends(require_api_key)], response_model=list[ClaimOut])
+@app.get("/api/claims", response_model=list[ClaimOut])
 def list_claims(
     topic_id: int | None = None,
     origin: str | None = None,
@@ -291,7 +294,7 @@ def list_claims(
         return list(session.scalars(stmt))
 
 
-@app.get("/api/claims/{claim_id}/evidence", dependencies=[Depends(require_api_key)], response_model=list[SourceOut])
+@app.get("/api/claims/{claim_id}/evidence", response_model=list[SourceOut])
 def get_claim_evidence(claim_id: int) -> list[Source]:
     with session_scope() as session:
         if not session.get(Claim, claim_id):
@@ -305,7 +308,7 @@ def get_claim_evidence(claim_id: int) -> list[Source]:
         return list(session.scalars(stmt))
 
 
-@app.post("/api/claims/manual", dependencies=[Depends(require_api_key)], response_model=ClaimOut)
+@app.post("/api/claims/manual", response_model=ClaimOut)
 def create_manual_claim(payload: ManualClaimCreate) -> Claim:
     with session_scope() as session:
         if not session.get(Topic, payload.topic_id):
@@ -341,7 +344,7 @@ def create_manual_claim(payload: ManualClaimCreate) -> Claim:
         return claim
 
 
-@app.patch("/api/claims/{claim_id}", dependencies=[Depends(require_api_key)], response_model=ClaimOut)
+@app.patch("/api/claims/{claim_id}", response_model=ClaimOut)
 def update_claim(claim_id: int, payload: ManualClaimUpdate) -> Claim:
     with session_scope() as session:
         claim = session.get(Claim, claim_id)
@@ -380,7 +383,7 @@ def update_claim(claim_id: int, payload: ManualClaimUpdate) -> Claim:
         return claim
 
 
-@app.post("/api/manual-notes", dependencies=[Depends(require_api_key)])
+@app.post("/api/manual-notes")
 def create_manual_note(payload: ManualNoteCreate) -> dict:
     queued_run_id: int | None = None
     with session_scope() as session:
@@ -412,7 +415,7 @@ def create_manual_note(payload: ManualNoteCreate) -> dict:
     return {"id": note_id, "topic_id": payload.topic_id, "title": payload.title, "priority": 100, "queued_run_id": queued_run_id}
 
 
-@app.get("/api/conflicts", dependencies=[Depends(require_api_key)], response_model=list[ConflictOut])
+@app.get("/api/conflicts", response_model=list[ConflictOut])
 def list_conflicts(topic_id: int | None = None, status: str = "open") -> list[Conflict]:
     with session_scope() as session:
         stmt = select(Conflict).order_by(Conflict.created_at.desc())
@@ -423,7 +426,7 @@ def list_conflicts(topic_id: int | None = None, status: str = "open") -> list[Co
         return list(session.scalars(stmt.limit(500)))
 
 
-@app.post("/api/conflicts/{conflict_id}/resolve", dependencies=[Depends(require_api_key)], response_model=ConflictOut)
+@app.post("/api/conflicts/{conflict_id}/resolve", response_model=ConflictOut)
 def resolve_conflict(conflict_id: int, payload: ConflictResolve) -> Conflict:
     with session_scope() as session:
         conflict = session.get(Conflict, conflict_id)
@@ -448,7 +451,7 @@ def resolve_conflict(conflict_id: int, payload: ConflictResolve) -> Conflict:
         return conflict
 
 
-@app.get("/api/watches", dependencies=[Depends(require_api_key)], response_model=list[WebsiteWatchOut])
+@app.get("/api/watches", response_model=list[WebsiteWatchOut])
 def list_watches(topic_id: int | None = None) -> list[WebsiteWatch]:
     with session_scope() as session:
         stmt = select(WebsiteWatch).order_by(WebsiteWatch.id.asc())
@@ -457,7 +460,7 @@ def list_watches(topic_id: int | None = None) -> list[WebsiteWatch]:
         return list(session.scalars(stmt))
 
 
-@app.post("/api/watches", dependencies=[Depends(require_api_key)], response_model=WebsiteWatchOut)
+@app.post("/api/watches", response_model=WebsiteWatchOut)
 def create_watch(payload: WebsiteWatchCreate) -> WebsiteWatch:
     with session_scope() as session:
         if not session.get(Topic, payload.topic_id):
@@ -474,7 +477,7 @@ def create_watch(payload: WebsiteWatchCreate) -> WebsiteWatch:
         return watch
 
 
-@app.delete("/api/watches/{watch_id}", dependencies=[Depends(require_api_key)])
+@app.delete("/api/watches/{watch_id}")
 def delete_watch(watch_id: int) -> dict:
     with session_scope() as session:
         watch = session.get(WebsiteWatch, watch_id)
@@ -484,7 +487,13 @@ def delete_watch(watch_id: int) -> dict:
         return {"deleted": watch_id}
 
 
-@app.get("/api/graph", dependencies=[Depends(require_api_key)])
+@app.get("/api/export/handoff")
+def export_handoff():
+    path = build_handoff_markdown()
+    return FileResponse(path, media_type="text/markdown; charset=utf-8", filename=path.name)
+
+
+@app.get("/api/graph")
 def graph(topic_id: int | None = None, limit: int = Query(default=300, ge=1, le=1000)) -> dict:
     with session_scope() as session:
         stmt = select(Relation).order_by(Relation.confidence.desc()).limit(limit)

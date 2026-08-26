@@ -179,9 +179,27 @@ def _select_ai_chunks(
     return selected
 
 
+def _topic_queries(raw: str) -> list[str]:
+    queries: list[str] = []
+    for line in (raw or "").splitlines():
+        value = normalize_space(line.strip().lstrip("-*\u2022 "))
+        if value and value not in queries:
+            queries.append(value)
+    if not queries and normalize_space(raw):
+        queries.append(normalize_space(raw))
+    return queries
+
+
+def _topic_brief(topic: Topic) -> str:
+    parts = [topic.query.strip()]
+    if topic.description.strip():
+        parts.append("Research context and guardrails:\n" + topic.description.strip())
+    return "\n\n".join(part for part in parts if part)
+
+
 def _analysis_cache_path(topic: Topic, content_hash: str) -> Path:
     model_key = settings.ollama_model.replace("/", "_").replace(":", "_")
-    prompt_key = sha256_text(f"v1|{topic.id}|{topic.name}|{topic.query}|{settings.ollama_model}")[:16]
+    prompt_key = sha256_text(f"v2|{topic.id}|{topic.name}|{topic.query}|{topic.description}|{settings.ollama_model}")[:16]
     return settings.chunk_dir / f"{content_hash}.{prompt_key}.{model_key}.json"
 
 
@@ -197,7 +215,7 @@ def _load_or_analyze(topic: Topic, candidate: CandidateChunk) -> ChunkAnalysis:
 
     analysis = ollama.analyze_chunk(
         topic_name=topic.name,
-        query=topic.query,
+        query=_topic_brief(topic),
         source_title=candidate.source_title,
         source_url=candidate.source_url,
         chunk=candidate.content,
@@ -288,7 +306,7 @@ def execute_research_run(run_id: int) -> None:
         if all_candidates:
             run.message = f"Resuming with {len(all_candidates)} persisted evidence chunks"
 
-    pending_queries = [topic.query]
+    pending_queries = _topic_queries(topic.query)
 
     for round_index in range(settings.max_search_rounds):
         with session_scope() as session:
@@ -304,7 +322,7 @@ def execute_research_run(run_id: int) -> None:
             )
             search_results: list[SearchResult] = _collect_watch_results(session, topic.id) if round_index == 0 else []
 
-        for query in pending_queries[:3]:
+        for query in pending_queries[: settings.max_queries_per_round]:
             search_results.extend(search_web(query, settings.max_results_per_query))
 
         unique_results: list[SearchResult] = []
@@ -421,7 +439,7 @@ def execute_research_run(run_id: int) -> None:
 
     synthesis = ollama.synthesize_run(
         topic_name=topic.name,
-        query=topic.query,
+        query=_topic_brief(topic),
         evidence_digest=digest,
         allow_followup=False,
     )

@@ -1,28 +1,17 @@
-const state = { apiKey: localStorage.getItem('internetboard_api_key') || '', dashboard: null, system: null };
+const state = { dashboard: null, system: null };
 const $ = (s) => document.querySelector(s);
 const esc = (v='') => String(v).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+const multiline = (v='') => esc(v).replace(/\n/g, '<br>');
 
 function toast(message) {
   const el = $('#toast'); el.textContent = message; el.classList.add('show');
   clearTimeout(toast.timer); toast.timer = setTimeout(() => el.classList.remove('show'), 3000);
 }
 
-function ensureKey() {
-  if (state.apiKey) return true;
-  const value = prompt('请输入 .env 中的 INTERNETBOARD_API_KEY');
-  if (!value) return false;
-  state.apiKey = value.trim(); localStorage.setItem('internetboard_api_key', state.apiKey); return true;
-}
-
 async function api(path, options={}) {
-  if (!ensureKey()) throw new Error('未设置 API Key');
-  const headers = { 'X-API-Key': state.apiKey, ...(options.headers || {}) };
+  const headers = { ...(options.headers || {}) };
   if (options.body && !(options.body instanceof FormData)) headers['Content-Type'] = 'application/json';
   const res = await fetch(path, {...options, headers});
-  if (res.status === 401) {
-    localStorage.removeItem('internetboard_api_key'); state.apiKey = '';
-    throw new Error('API Key 无效，请重新设置');
-  }
   if (!res.ok) {
     let msg = `${res.status} ${res.statusText}`;
     try { const j = await res.json(); msg = j.detail || msg; } catch (_) {}
@@ -39,7 +28,6 @@ function renderStats() {
   $('#stats').innerHTML = [
     ['专题', c.topics || 0], ['运行中', c.active_runs || 0], ['证据', c.sources || 0], ['知识 Claim', c.claims || 0], ['未解决冲突', c.open_conflicts || 0]
   ].map(([label,value]) => `<div class="stat"><strong>${value}</strong><span>${label}</span></div>`).join('');
-
   const m = state.system?.model || {};
   const b = $('#modelBadge');
   if (m.ok && m.model_ready) { b.className='badge good'; b.textContent=`${m.model} 已就绪`; }
@@ -52,12 +40,20 @@ function renderTopics() {
   $('#topics').innerHTML = topics.length ? topics.map(t => `
     <div class="item">
       <div class="item-head">
-        <div><div class="item-title">${esc(t.name)}</div><div class="meta">${esc(t.query)} · 优先级 ${t.priority} · ${t.enabled?'启用':'停用'}</div></div>
-        <div class="actions"><button onclick="runTopic(${t.id})">立即刷新</button></div>
+        <div>
+          <div class="item-title">${esc(t.name)}</div>
+          <div class="meta">${multiline(t.query)} · 优先级 ${t.priority} · ${t.enabled?'启用':'停用'}</div>
+          ${t.description ? `<div class="meta">${multiline(t.description)}</div>` : ''}
+        </div>
+        <div class="actions">
+          <button class="ghost" onclick="editTopic(${t.id})">编辑</button>
+          <button onclick="runTopic(${t.id})">立即刷新</button>
+        </div>
       </div>
     </div>`).join('') : '<div class="meta">还没有专题。先新增一个研究专题。</div>';
   const options = topics.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
-  $('#noteTopic').innerHTML = options; $('#watchTopic').innerHTML = options;
+  $('#noteTopic').innerHTML = options;
+  $('#watchTopic').innerHTML = options;
 }
 
 function renderRuns() {
@@ -81,7 +77,7 @@ function renderClaims() {
     <div class="claim">
       <p>${esc(c.claim_text)}</p>
       <div class="rank">${c.origin==='manual'?'人工':'AI'} · ${c.claim_type} · P${c.priority} · 重要度 ${c.importance} · 置信度 ${(c.confidence*100).toFixed(0)}% · 证据出现 ${c.occurrence_count} 次</div>
-      <div class="actions">${c.priority < 100 ? `<button class="ghost" onclick="confirmClaim(${c.id})">\u4eba\u5de5\u786e\u8ba4</button>` : ''}<button class="ghost" onclick="editClaim(${c.id})">\u4eba\u5de5\u4fee\u6539</button></div>
+      <div class="actions">${c.priority < 100 ? `<button class="ghost" onclick="confirmClaim(${c.id})">人工确认</button>` : ''}<button class="ghost" onclick="editClaim(${c.id})">人工修改</button></div>
     </div>`).join('') : '<div class="meta">暂无知识。运行专题后会在这里出现。</div>';
 }
 
@@ -93,7 +89,7 @@ function renderConflicts() {
       <div class="meta">A：${esc(c.claim_a_text)}</div>
       <div class="meta">B：${esc(c.claim_b_text)}</div>
       <div class="meta">置信度 ${(c.confidence*100).toFixed(0)}% · ${c.status}</div>
-      <div class="actions">${c.claim_a_id ? `<button class="ghost" onclick="resolveConflict(${c.id},${c.claim_a_id},'A')">\u91c7\u7528 A</button>` : ''}${c.claim_b_id ? `<button class="ghost" onclick="resolveConflict(${c.id},${c.claim_b_id},'B')">\u91c7\u7528 B</button>` : ''}<button class="ghost" onclick="resolveConflict(${c.id},null,'manual')">\u6807\u8bb0\u5df2\u5904\u7406</button></div>
+      <div class="actions">${c.claim_a_id ? `<button class="ghost" onclick="resolveConflict(${c.id},${c.claim_a_id},'A')">采用 A</button>` : ''}${c.claim_b_id ? `<button class="ghost" onclick="resolveConflict(${c.id},${c.claim_b_id},'B')">采用 B</button>` : ''}<button class="ghost" onclick="resolveConflict(${c.id},null,'manual')">标记已处理</button></div>
     </div>`).join('') : '<div class="meta">当前没有未解决冲突。</div>';
 }
 
@@ -140,19 +136,41 @@ async function runTopic(id) {
 }
 window.runTopic = runTopic;
 
+function resetTopicForm() {
+  const form = $('#topicForm');
+  form.reset();
+  form.elements.topic_id.value = '';
+  $('#topicSubmit').textContent = '新增专题';
+  $('#topicCancel').hidden = true;
+}
+
+function editTopic(id) {
+  const topic = (state.dashboard?.topics || []).find(t => t.id === id);
+  if (!topic) return;
+  const form = $('#topicForm');
+  form.elements.topic_id.value = topic.id;
+  form.elements.name.value = topic.name || '';
+  form.elements.query.value = topic.query || '';
+  form.elements.description.value = topic.description || '';
+  $('#topicSubmit').textContent = '保存专题';
+  $('#topicCancel').hidden = false;
+  form.scrollIntoView({behavior:'smooth', block:'center'});
+}
+window.editTopic = editTopic;
+
 async function confirmClaim(id) {
   const c=(state.dashboard?.claims||[]).find(x=>x.id===id); if(!c) return;
   try {
     await api('/api/claims/manual',{method:'POST',body:JSON.stringify({topic_id:c.topic_id,claim_text:c.claim_text,category:c.category,event_time:c.event_time,importance:c.importance,confidence:Math.max(c.confidence,0.95)})});
-    toast('\u5df2\u4eba\u5de5\u786e\u8ba4\uff0c\u4f18\u5148\u7ea7\u5347\u4e3a 100'); await load();
+    toast('已人工确认，优先级升为 100'); await load();
   } catch(e) { toast(e.message); }
 }
 window.confirmClaim=confirmClaim;
 
 async function editClaim(id) {
   const c=(state.dashboard?.claims||[]).find(x=>x.id===id); if(!c) return;
-  const text=prompt('\u4fee\u6539 Claim',c.claim_text); if(!text || text.trim()===c.claim_text) return;
-  try { await api(`/api/claims/${id}`,{method:'PATCH',body:JSON.stringify({claim_text:text.trim()})}); toast('\u5df2\u4eba\u5de5\u4fee\u6539\uff0c\u4f18\u5148\u7ea7\u81f3\u5c11 80'); await load(); } catch(e) { toast(e.message); }
+  const text=prompt('修改 Claim',c.claim_text); if(!text || text.trim()===c.claim_text) return;
+  try { await api(`/api/claims/${id}`,{method:'PATCH',body:JSON.stringify({claim_text:text.trim()})}); toast('已人工修改，优先级至少 80'); await load(); } catch(e) { toast(e.message); }
 }
 window.editClaim=editClaim;
 
@@ -160,20 +178,26 @@ async function resolveConflict(id,winner,label) {
   try {
     const payload={resolution:winner?`Manual resolution: selected claim ${label}`:'Manual resolution without selecting a winning claim',winning_claim_id:winner};
     await api(`/api/conflicts/${id}/resolve`,{method:'POST',body:JSON.stringify(payload)});
-    toast('\u51b2\u7a81\u5df2\u4eba\u5de5\u5904\u7406'); await load();
+    toast('冲突已人工处理'); await load();
   } catch(e) { toast(e.message); }
 }
 window.resolveConflict=resolveConflict;
 
-$('#apiKeyBtn').addEventListener('click', () => {
-  const value = prompt('输入新的 INTERNETBOARD_API_KEY', state.apiKey || '');
-  if (value) { state.apiKey=value.trim(); localStorage.setItem('internetboard_api_key', state.apiKey); load(); }
+$('#exportBtn').addEventListener('click', () => {
+  window.location.href = '/api/export/handoff';
 });
 $('#refreshBtn').addEventListener('click', load);
+$('#topicCancel').addEventListener('click', resetTopicForm);
 
 $('#topicForm').addEventListener('submit', async e => {
   e.preventDefault(); const f=new FormData(e.currentTarget);
-  try { await api('/api/topics',{method:'POST',body:JSON.stringify({name:f.get('name'),query:f.get('query'),description:'',enabled:true,priority:50})}); e.currentTarget.reset(); toast('专题已创建'); await load(); } catch(err){ toast(err.message); }
+  const id = Number(f.get('topic_id') || 0);
+  const payload = {name:f.get('name'),query:f.get('query'),description:f.get('description')||'',enabled:true,priority:50};
+  try {
+    if (id) await api(`/api/topics/${id}`,{method:'PATCH',body:JSON.stringify(payload)});
+    else await api('/api/topics',{method:'POST',body:JSON.stringify(payload)});
+    resetTopicForm(); toast(id?'专题已更新':'专题已创建'); await load();
+  } catch(err){ toast(err.message); }
 });
 
 $('#noteForm').addEventListener('submit', async e => {

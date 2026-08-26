@@ -1,0 +1,40 @@
+from pathlib import Path
+
+
+def must(condition: bool, message: str) -> None:
+    if not condition:
+        raise SystemExit(message)
+
+
+def text(path: str) -> str:
+    return Path(path).read_text(encoding="utf-8")
+
+compose = text("docker-compose.yml")
+main = text("backend/app/main.py")
+dockerfile = text("backend/Dockerfile")
+frontend = text("frontend/app.js")
+index = text("frontend/index.html")
+workflow = text(".github/workflows/dockerhub.yml")
+topics = text("config/topics.yml")
+
+must("build:" not in compose, "Production Compose must not build on the NAS")
+for image in (
+    "milesxia/internetboard-backend:latest",
+    "milesxia/internetboard-worker:latest",
+    "milesxia/internetboard-scheduler:latest",
+    "milesxia/internetboard-frontend:latest",
+    "ollama/ollama:latest",
+):
+    must(image in compose, f"Missing production image: {image}")
+
+runtime_text = "\n".join((main, frontend, index, compose, text(".env.example")))
+must("INTERNETBOARD_API_KEY" not in runtime_text, "API-key UI/runtime dependency must be removed")
+must("X-API-Key" not in runtime_text, "API-key header must be removed")
+must("bootstrap_defaults_once" in main, "One-time bootstrap is not wired into startup")
+must("/api/export/handoff" in main, "Handoff export endpoint is missing")
+must("exportBtn" in index and "exportBtn" in frontend, "Handoff export UI is missing")
+must("COPY config /app/config" in dockerfile, "Backend image does not contain config defaults")
+must("COPY seed /app/seed" in dockerfile, "Backend image does not contain seed assets")
+must("context: ." in workflow and "file: ./backend/Dockerfile" in workflow, "Backend CI build context is not repository root")
+must(topics.count("- slug:") >= 5, "Expected built-in topic definitions are missing")
+print("InternetBoard production invariants: PASS")

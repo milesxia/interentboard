@@ -3,7 +3,6 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,7 +17,6 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+psycopg://internetboard:internetboard@postgres:5432/internetboard"
     redis_url: str = "redis://redis:6379/0"
-    api_key: str = Field(default="change-me", min_length=8)
 
     ollama_base_url: str = "http://ollama:11434"
     ollama_model: str = "qwen3.8:27b-q4_K_M"
@@ -32,6 +30,7 @@ class Settings(BaseSettings):
     search_timeout_seconds: int = 25
     fetch_timeout_seconds: int = 45
     max_search_rounds: int = 2
+    max_queries_per_round: int = 6
     max_results_per_query: int = 8
     max_sources_per_run: int = 8
     max_total_ai_chunks: int = 12
@@ -81,6 +80,8 @@ class Settings(BaseSettings):
             self.history_dir,
             self.conflict_dir,
             self.data_dir / "vector",
+            self.data_dir / "exports",
+            self.data_dir / ".bootstrap",
         ):
             path.mkdir(parents=True, exist_ok=True)
 

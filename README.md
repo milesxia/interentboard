@@ -7,9 +7,9 @@ Production profile in this package:
 - Host: QNAP TS-673A, AMD Ryzen Embedded V1500B, 40 GB RAM, NVIDIA GTX 1650 4 GB.
 - Deployment root: `/share/Container/internetboard`.
 - Runtime: Docker Compose / QNAP Container Station.
-- AI: exactly one model, `qwen3.8:27b-q4_K_M`, served by `ollama/ollama:0.32.13`.
+- AI: exactly one model, `qwen3.8:27b-q4_K_M`, served by `ollama/ollama:latest`.
 - Inference profile: one parallel request, one loaded model, 8192 context, Flash Attention, q8_0 KV cache, automatic CPU/RAM + NVIDIA partial GPU offload.
-- Web port: `8788` by default.
+- Web port: `8733` by default.
 
 ## Install
 
@@ -27,7 +27,7 @@ Extract this package anywhere under a QNAP share, enter the extracted directory,
 sh install.sh
 ```
 
-`install.sh` copies the release to `/share/Container/internetboard` if necessary, preserves an existing `.env`, validates Compose, builds the application images, verifies NVIDIA visibility, pulls the exact Qwen3.8 model, runs a schema-constrained AI request, verifies actual GPU participation, and checks the final HTTP health endpoint. It stops with a non-zero exit code if a production requirement is not met.
+`install.sh` copies the release to `/share/Container/internetboard` if necessary, preserves an existing `.env`, validates Compose, pulls the published application images, verifies NVIDIA visibility, pulls the exact Qwen3.8 model, runs a schema-constrained AI request, verifies actual GPU participation, and checks the final HTTP health endpoint. It stops with a non-zero exit code if a production requirement is not met.
 
 After a successful install:
 
@@ -35,7 +35,15 @@ After a successful install:
 http://NAS-IP:8788
 ```
 
-The generated API key is stored in `.env` and printed once at the end of installation. The browser dashboard asks for that key and stores it in browser local storage.
+The trusted-LAN profile does not use an application API-key prompt.
+
+## One-time bootstrap
+
+Built-in topics and query points from `config/topics.yml` are inserted only once when PostgreSQL has no topics. A durable marker under `data/.bootstrap` prevents future image updates from overwriting user edits. Each line in a topic query block is executed as an independent first-round web query.
+
+## LLM handoff export
+
+The dashboard `Export Handoff` action produces a versioned Markdown snapshot under `data/exports` and downloads it to the browser. The export is designed for uploading into another LLM and includes topic/query definitions, manual knowledge, claims, recent runs, conflicts, graph relations and evidence excerpts.
 
 ## Core behavior
 
@@ -96,6 +104,6 @@ sh restore.sh /path/to/internetboard-YYYYMMDD-HHMMSS.tgz
 
 ## Security notes
 
-Only the Nginx frontend port is published. PostgreSQL, Redis, backend API, and Ollama remain on the private Compose network. Protected `/api/*` routes require `X-API-Key`. Docker logs are rotated (`20m x 3` per service). The generated `.env` contains secrets and must not be published.
+Only the Nginx frontend port is published. PostgreSQL, Redis, backend API, and Ollama remain on the private Compose network. The trusted-LAN profile has no application-level API key; use reverse-proxy/VPN access control before any Internet exposure. Docker logs are rotated (`20m x 3` per service). The generated `.env` contains secrets and must not be published.
 
 For Internet exposure, place the dashboard behind a QNAP reverse proxy with HTTPS and additional access controls. The default package is intended for trusted LAN/VPN access.

@@ -4,25 +4,43 @@ x-logging: &default-logging
     max-size: "20m"
     max-file: "3"
 
+x-app-env: &app-env
+  TZ: ${TZ}
+  DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+  REDIS_URL: redis://redis:6379/0
+  DATA_DIR: /data
+  OLLAMA_BASE_URL: http://ollama:11434
+  OLLAMA_MODEL: ${OLLAMA_MODEL}
+  OLLAMA_CONTEXT_LENGTH: ${OLLAMA_CONTEXT_LENGTH}
+  OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE}
+  OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS}
+  OLLAMA_JSON_RETRIES: ${OLLAMA_JSON_RETRIES}
+  MAX_SEARCH_ROUNDS: ${MAX_SEARCH_ROUNDS}
+  MAX_QUERIES_PER_ROUND: ${MAX_QUERIES_PER_ROUND}
+  MAX_RESULTS_PER_QUERY: ${MAX_RESULTS_PER_QUERY}
+  MAX_SOURCES_PER_RUN: ${MAX_SOURCES_PER_RUN}
+  MAX_TOTAL_AI_CHUNKS: ${MAX_TOTAL_AI_CHUNKS}
+  MAX_AI_CHUNKS_PER_SOURCE: ${MAX_AI_CHUNKS_PER_SOURCE}
+  CHUNK_CHARS: ${CHUNK_CHARS}
+  CHUNK_OVERLAP_CHARS: ${CHUNK_OVERLAP_CHARS}
+  ALLOW_PRIVATE_URLS: ${ALLOW_PRIVATE_URLS}
+  SEARXNG_URL: ${SEARXNG_URL}
+  SCHEDULER_HOUR: ${SCHEDULER_HOUR}
+  SCHEDULER_MINUTE: ${SCHEDULER_MINUTE}
+  WEBSITE_WATCH_MINUTES: ${WEBSITE_WATCH_MINUTES}
+
 services:
   postgres:
-    logging: *default-logging
     image: postgres:16-alpine
     container_name: internetboard-postgres
     restart: unless-stopped
+    logging: *default-logging
     environment:
       TZ: ${TZ}
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    command:
-      - postgres
-      - -c
-      - shared_buffers=256MB
-      - -c
-      - effective_cache_size=1GB
-      - -c
-      - max_connections=50
+    command: ["postgres", "-c", "shared_buffers=256MB", "-c", "effective_cache_size=1GB", "-c", "max_connections=50"]
     volumes:
       - ${APP_ROOT}/postgres:/var/lib/postgresql/data
     healthcheck:
@@ -33,10 +51,10 @@ services:
     networks: [internetboard]
 
   redis:
-    logging: *default-logging
     image: redis:7.4-alpine
     container_name: internetboard-redis
     restart: unless-stopped
+    logging: *default-logging
     command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
     environment:
       TZ: ${TZ}
@@ -50,10 +68,11 @@ services:
     networks: [internetboard]
 
   ollama:
-    logging: *default-logging
-    image: ollama/ollama:0.32.13
+    image: ollama/ollama:latest
+    pull_policy: always
     container_name: internetboard-ollama
     restart: unless-stopped
+    logging: *default-logging
     environment:
       TZ: ${TZ}
       OLLAMA_HOST: 0.0.0.0:11434
@@ -84,10 +103,11 @@ services:
     networks: [internetboard]
 
   model-init:
-    logging: *default-logging
-    image: ollama/ollama:0.32.13
+    image: ollama/ollama:latest
+    pull_policy: always
     container_name: internetboard-model-init
     restart: "no"
+    logging: *default-logging
     depends_on:
       ollama:
         condition: service_healthy
@@ -95,16 +115,15 @@ services:
       OLLAMA_HOST: http://ollama:11434
       OLLAMA_MODEL: ${OLLAMA_MODEL}
     entrypoint: ["/bin/sh", "-c"]
-    command: ["ollama pull \"$${OLLAMA_MODEL}\""]
+    command: ['ollama pull "$${OLLAMA_MODEL}"']
     networks: [internetboard]
 
   backend:
-    logging: *default-logging
-    build:
-      context: ./backend
-    image: internetboard/backend:1.0.0
+    image: milesxia/internetboard-backend:latest
+    pull_policy: always
     container_name: internetboard-backend
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -114,30 +133,7 @@ services:
         condition: service_healthy
       model-init:
         condition: service_completed_successfully
-    environment: &app-env
-      TZ: ${TZ}
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      REDIS_URL: redis://redis:6379/0
-      API_KEY: ${INTERNETBOARD_API_KEY}
-      DATA_DIR: /data
-      OLLAMA_BASE_URL: http://ollama:11434
-      OLLAMA_MODEL: ${OLLAMA_MODEL}
-      OLLAMA_CONTEXT_LENGTH: ${OLLAMA_CONTEXT_LENGTH}
-      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE}
-      OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS}
-      OLLAMA_JSON_RETRIES: ${OLLAMA_JSON_RETRIES}
-      MAX_SEARCH_ROUNDS: ${MAX_SEARCH_ROUNDS}
-      MAX_RESULTS_PER_QUERY: ${MAX_RESULTS_PER_QUERY}
-      MAX_SOURCES_PER_RUN: ${MAX_SOURCES_PER_RUN}
-      MAX_TOTAL_AI_CHUNKS: ${MAX_TOTAL_AI_CHUNKS}
-      MAX_AI_CHUNKS_PER_SOURCE: ${MAX_AI_CHUNKS_PER_SOURCE}
-      CHUNK_CHARS: ${CHUNK_CHARS}
-      CHUNK_OVERLAP_CHARS: ${CHUNK_OVERLAP_CHARS}
-      ALLOW_PRIVATE_URLS: ${ALLOW_PRIVATE_URLS}
-      SEARXNG_URL: ${SEARXNG_URL}
-      SCHEDULER_HOUR: ${SCHEDULER_HOUR}
-      SCHEDULER_MINUTE: ${SCHEDULER_MINUTE}
-      WEBSITE_WATCH_MINUTES: ${WEBSITE_WATCH_MINUTES}
+    environment: *app-env
     volumes:
       - ${APP_ROOT}/data:/data
     healthcheck:
@@ -149,10 +145,11 @@ services:
     networks: [internetboard]
 
   worker:
-    logging: *default-logging
-    image: internetboard/backend:1.0.0
+    image: milesxia/internetboard-worker:latest
+    pull_policy: always
     container_name: internetboard-worker
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       backend:
         condition: service_healthy
@@ -163,10 +160,11 @@ services:
     networks: [internetboard]
 
   scheduler:
-    logging: *default-logging
-    image: internetboard/backend:1.0.0
+    image: milesxia/internetboard-scheduler:latest
+    pull_policy: always
     container_name: internetboard-scheduler
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       backend:
         condition: service_healthy
@@ -177,12 +175,11 @@ services:
     networks: [internetboard]
 
   frontend:
-    logging: *default-logging
-    build:
-      context: ./frontend
-    image: internetboard/frontend:1.0.0
+    image: milesxia/internetboard-frontend:latest
+    pull_policy: always
     container_name: internetboard-frontend
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       backend:
         condition: service_healthy

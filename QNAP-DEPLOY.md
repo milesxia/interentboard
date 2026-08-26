@@ -1,46 +1,32 @@
-# QNAP TS-673A 部署 / 升级 InternetBoard 0.4
+# InternetBoard v1.0 Production - QNAP TS-673A
 
-## 不要删除旧数据
+## Runtime
 
-```text
-/share/Container/internetboard/data
-/share/Container/internetboard/ollama
+- QNAP path: `/share/Container/internetboard`
+- Web: `http://NAS_IP:8733`
+- AI: `qwen3.8:27b-q4_K_M` only
+- Ollama: `ollama/ollama:latest`
+- InternetBoard images: `milesxia/internetboard-*:latest`
+- NAS never builds application source.
+
+## First start
+
+On the first start only, if the database has no topics and the durable bootstrap marker does not exist, the built-in `config/topics.yml` definitions are inserted into PostgreSQL. After that, `/data/.bootstrap/topics-v1.json` prevents any image upgrade from re-applying or overwriting defaults. User edits remain authoritative.
+
+## Handoff export
+
+The web UI contains an `Export Handoff` action. It generates an LLM-oriented Markdown snapshot under `/share/Container/internetboard/data/exports` and downloads the same file to the browser. It contains topic/query definitions, manual notes, claims, recent research summaries, conflicts, graph relations and evidence excerpts.
+
+## Upgrade
+
+```bash
+cd /share/Container/internetboard
+docker compose pull
+docker compose up -d
 ```
 
-v0.4 会自动迁移现有 `intelboard.db`，旧证据、Claim、人工知识和已下载模型继续保留。
+Persistent directories under `/share/Container/internetboard` are not removed during an image upgrade.
 
-## 默认模型
+## Access
 
-```text
-qwen3:4b-instruct-2507-q4_K_M   # 大量文本提炼
-qwen3.8:27b-q4_K_M              # 最终分析
-qwen3-embedding:0.6b             # 语义检索，达到知识量门槛后按需下载
-```
-
-## Container Station
-
-用仓库中的 `docker-compose.yml` 更新应用。默认 Web：
-
-```text
-http://NAS_IP:8733
-```
-
-Lucky 现有 HTTPS 反代可继续使用。
-
-## GPU / 内存策略
-
-- 4B 提炼模型优先尽量使用 GTX 1650。
-- 27B 默认请求 `num_gpu=4`；如果显存不足，应用自动逐级降低 GPU offload 后重试。
-- Ollama 同时只驻留 1 个模型，AI 并发 1。
-- Ollama 默认内存上限 30GB；InternetBoard 默认 3GB。
-
-## 第一次升级后的运行
-
-第一次会比日常增量任务更久，因为系统会逐步：
-
-1. 迁移旧数据库结构；
-2. 补做旧 Evidence 的 Claim 化；
-3. 建立页面版本 / 来源组关系；
-4. 当单专题有效 Claim 达到 200 条后，按需建立语义向量索引。
-
-这些过程都有断点，不要求一次做完。
+There is no InternetBoard application API-key prompt in the trusted-LAN profile. Do not expose the service directly to the public Internet; use HTTPS and access control at the reverse proxy/VPN layer if remote access is required.
