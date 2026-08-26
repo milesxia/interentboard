@@ -56,9 +56,9 @@ class OllamaClient:
     def resource_summary(self) -> dict:
         """Summarize Ollama's loaded-model memory split from /api/ps.
 
-        size - size_vram is the CPU/RAM-side model allocation reported by Ollama.
-        It is not the same metric as QTS process RSS when mmap is used; enabling
-        mlock is what asks the kernel to keep those mapped pages resident.
+        size - size_vram is Ollama's Host-side model allocation. It is not
+        process RSS. Actual resident/locked RAM must be verified from the
+        llama-server process (VmRSS/VmLck).
         """
         models = self.running_models()
         if not models:
@@ -69,8 +69,9 @@ class OllamaClient:
                 "vram_bytes": 0,
                 "cpu_ram_bytes": 0,
                 "context_length": settings.ollama_context_length,
-                "mlock_requested": settings.ollama_use_mlock,
-                "mmap_requested": settings.ollama_use_mmap,
+                "load_mode": settings.llama_arg_load_mode,
+                "fit_target_mib": settings.llama_arg_fit_target,
+                "mmproj_gpu_offload": settings.llama_arg_mmproj_offload,
                 "pinned": settings.ollama_pin_model,
             }
         item = next((m for m in models if m.get("name") == settings.ollama_model or m.get("model") == settings.ollama_model), models[0])
@@ -84,8 +85,9 @@ class OllamaClient:
             "cpu_ram_bytes": max(0, size - vram),
             "context_length": int(item.get("context_length") or settings.ollama_context_length),
             "expires_at": item.get("expires_at"),
-            "mlock_requested": settings.ollama_use_mlock,
-            "mmap_requested": settings.ollama_use_mmap,
+            "load_mode": settings.llama_arg_load_mode,
+            "fit_target_mib": settings.llama_arg_fit_target,
+            "mmproj_gpu_offload": settings.llama_arg_mmproj_offload,
             "pinned": settings.ollama_pin_model,
         }
 
@@ -138,8 +140,6 @@ class OllamaClient:
                     "seed": 42,
                     "num_ctx": settings.ollama_context_length,
                     "num_predict": num_predict,
-                    "use_mmap": settings.ollama_use_mmap,
-                    "use_mlock": settings.ollama_use_mlock,
                     "repeat_penalty": 1.05,
                 },
             }

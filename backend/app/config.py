@@ -24,9 +24,14 @@ class Settings(BaseSettings):
     ollama_keep_alive: str = "10m"
     ollama_timeout_seconds: int = 900
     ollama_json_retries: int = 3
-    ollama_use_mmap: bool = True
-    ollama_use_mlock: bool = True
     ollama_pin_model: bool = True
+
+    # llama.cpp runner policy. Current Ollama no longer accepts use_mlock
+    # as an API runner option, so these are applied to llama-server through
+    # LLAMA_ARG_* environment variables on the Ollama container.
+    llama_arg_load_mode: str = "mlock"
+    llama_arg_fit_target: int = 768
+    llama_arg_mmproj_offload: bool = False
     ollama_num_predict_chunk: int = 1200
     ollama_num_predict_synthesis: int = 1800
 

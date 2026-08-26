@@ -15,9 +15,10 @@ x-app-env: &app-env
   OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE}
   OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS}
   OLLAMA_JSON_RETRIES: ${OLLAMA_JSON_RETRIES}
-  OLLAMA_USE_MMAP: ${OLLAMA_USE_MMAP:-true}
-  OLLAMA_USE_MLOCK: ${OLLAMA_USE_MLOCK:-true}
   OLLAMA_PIN_MODEL: ${OLLAMA_PIN_MODEL:-true}
+  LLAMA_ARG_LOAD_MODE: ${LLAMA_ARG_LOAD_MODE:-mlock}
+  LLAMA_ARG_FIT_TARGET: ${LLAMA_ARG_FIT_TARGET:-768}
+  LLAMA_ARG_MMPROJ_OFFLOAD: ${LLAMA_ARG_MMPROJ_OFFLOAD:-false}
   MAX_SEARCH_ROUNDS: ${MAX_SEARCH_ROUNDS}
   MAX_QUERIES_PER_ROUND: ${MAX_QUERIES_PER_ROUND}
   MAX_RESULTS_PER_QUERY: ${MAX_RESULTS_PER_QUERY}
@@ -114,6 +115,16 @@ services:
       OLLAMA_FLASH_ATTENTION: "true"
       OLLAMA_KV_CACHE_TYPE: q8_0
       OLLAMA_LOAD_TIMEOUT: 20m
+
+      # V4.5: Qwen3.8 27B + GTX1650 4GB hybrid policy.
+      # Lock Host-side weights in RAM and reserve scarce VRAM for
+      # language-model layers. Vision remains enabled; only the
+      # multimodal projector executes on CPU.
+      LLAMA_ARG_LOAD_MODE: ${LLAMA_ARG_LOAD_MODE:-mlock}
+      LLAMA_ARG_FIT: ${LLAMA_ARG_FIT:-on}
+      LLAMA_ARG_FIT_TARGET: ${LLAMA_ARG_FIT_TARGET:-768}
+      LLAMA_ARG_MMPROJ_OFFLOAD: ${LLAMA_ARG_MMPROJ_OFFLOAD:-false}
+
       NVIDIA_VISIBLE_DEVICES: all
     volumes:
       - ${APP_ROOT}/ollama:/root/.ollama
