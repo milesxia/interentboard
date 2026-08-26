@@ -56,3 +56,12 @@ must("recoverRun" in frontend and "僵尸任务" in frontend, "Runtime recovery 
 must("inspect ping" in compose, "Worker Docker healthcheck is missing")
 must("RUN_HEARTBEAT_INTERVAL_SECONDS" in compose, "Runtime heartbeat Compose settings are missing")
 print("InternetBoard production invariants: PASS")
+
+
+# V4.1 CI/frontend invariants
+must(frontend.count("const rt = state.system?.runtime || {};") == 1, "Frontend runtime state must be declared exactly once in renderStats")
+must("node --check frontend/app.js" in workflow, "CI must syntax-check frontend JavaScript")
+must("DATA_DIR: /tmp/internetboard-ci-data" in workflow, "CI import check must use a writable data directory")
+must("run: |" in workflow and "runtime imports PASS" in workflow, "CI import command must use a YAML block scalar")
+must("actions/checkout@v7" in workflow and "actions/setup-python@v7" in workflow, "CI action majors are not current")
+print("InternetBoard V4.1 CI/frontend invariants: PASS")

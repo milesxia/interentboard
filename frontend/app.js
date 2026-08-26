@@ -31,7 +31,6 @@ function renderStats() {
   ].map(([label,value]) => `<div class="stat"><strong>${value}</strong><span>${label}</span></div>`).join('');
   const m = state.system?.model || {};
   const b = $('#modelBadge');
-  const rt = state.system?.runtime || {};
   if (!rt.broker_ok) { b.className='badge bad'; b.textContent='Redis/任务队列异常'; }
   else if (!rt.worker_online) { b.className='badge bad'; b.textContent='Worker 离线'; }
   else if ((rt.stale_run_ids || []).length) { b.className='badge warn'; b.textContent=`Worker 在线 · ${rt.stale_run_ids.length} 个任务待恢复`; }
