@@ -11,14 +11,14 @@ x-app-env: &app-env
   DATA_DIR: /data
   OLLAMA_BASE_URL: http://ollama:11434
   OLLAMA_MODEL: ${OLLAMA_MODEL}
-  OLLAMA_CONTEXT_LENGTH: ${OLLAMA_CONTEXT_LENGTH}
-  OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE}
+  OLLAMA_CONTEXT_LENGTH: "8192"
+  OLLAMA_KEEP_ALIVE: "-1"
   OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS}
   OLLAMA_JSON_RETRIES: ${OLLAMA_JSON_RETRIES}
-  OLLAMA_PIN_MODEL: ${OLLAMA_PIN_MODEL:-true}
-  LLAMA_ARG_LOAD_MODE: ${LLAMA_ARG_LOAD_MODE:-mlock}
-  LLAMA_ARG_FIT_TARGET: ${LLAMA_ARG_FIT_TARGET:-768}
-  LLAMA_ARG_MMPROJ_OFFLOAD: ${LLAMA_ARG_MMPROJ_OFFLOAD:-false}
+  OLLAMA_PIN_MODEL: "true"
+  LLAMA_ARG_LOAD_MODE: "mmap"
+  LLAMA_ARG_FIT_TARGET: "0"
+  LLAMA_ARG_MMPROJ_OFFLOAD: "true"
   MAX_SEARCH_ROUNDS: ${MAX_SEARCH_ROUNDS}
   MAX_QUERIES_PER_ROUND: ${MAX_QUERIES_PER_ROUND}
   MAX_RESULTS_PER_QUERY: ${MAX_RESULTS_PER_QUERY}
@@ -97,33 +97,27 @@ services:
     pull_policy: always
     container_name: internetboard-ollama
     restart: unless-stopped
-    cap_add:
-      - IPC_LOCK
-    ulimits:
-      memlock:
-        soft: -1
-        hard: -1
     logging: *default-logging
     environment:
       TZ: ${TZ}
       OLLAMA_HOST: 0.0.0.0:11434
-      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE}
-      OLLAMA_CONTEXT_LENGTH: ${OLLAMA_CONTEXT_LENGTH}
-      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_KEEP_ALIVE: "-1"
+      OLLAMA_CONTEXT_LENGTH: "8192"
       OLLAMA_MAX_LOADED_MODELS: "1"
-      OLLAMA_MAX_QUEUE: "32"
       OLLAMA_FLASH_ATTENTION: "true"
       OLLAMA_KV_CACHE_TYPE: q8_0
+      OLLAMA_GPU_OVERHEAD: "0"
       OLLAMA_LOAD_TIMEOUT: 20m
 
-      # V4.5: Qwen3.8 27B + GTX1650 4GB hybrid policy.
-      # Lock Host-side weights in RAM and reserve scarce VRAM for
-      # language-model layers. Vision remains enabled; only the
-      # multimodal projector executes on CPU.
-      LLAMA_ARG_LOAD_MODE: ${LLAMA_ARG_LOAD_MODE:-mlock}
-      LLAMA_ARG_FIT: ${LLAMA_ARG_FIT:-on}
-      LLAMA_ARG_FIT_TARGET: ${LLAMA_ARG_FIT_TARGET:-768}
-      LLAMA_ARG_MMPROJ_OFFLOAD: ${LLAMA_ARG_MMPROJ_OFFLOAD:-false}
+      # FINAL UVM policy: do not cap GPU layers or reserve VRAM.
+      # CUDA Unified Memory allows GPU allocations to spill into system RAM.
+      GGML_CUDA_ENABLE_UNIFIED_MEMORY: "1"
+      LLAMA_ARG_LOAD_MODE: "mmap"
+      LLAMA_ARG_N_GPU_LAYERS: "all"
+      LLAMA_ARG_FIT: "off"
+      LLAMA_ARG_FIT_TARGET: "0"
+      LLAMA_ARG_MMPROJ_OFFLOAD: "true"
+      LLAMA_ARG_OP_OFFLOAD: "true"
 
       NVIDIA_VISIBLE_DEVICES: all
     volumes:
@@ -197,7 +191,7 @@ services:
     environment: *app-env
     volumes:
       - ${APP_ROOT}/data:/data
-    command: ["celery", "-A", "app.tasks.celery_app", "worker", "--loglevel=INFO", "--concurrency=1", "--prefetch-multiplier=1", "--max-tasks-per-child=10"]
+    command: ["celery", "-A", "app.tasks.celery_app", "worker", "--loglevel=INFO", "--prefetch-multiplier=1", "--without-mingle", "--without-gossip", "--without-heartbeat"]
     stop_grace_period: 2m
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.tasks.celery_app inspect ping -d celery@$$HOSTNAME --timeout=5 2>/dev/null | grep -q pong"]

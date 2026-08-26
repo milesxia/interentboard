@@ -29,7 +29,7 @@ function renderStats() {
   const rt = state.system?.runtime || {};
   const mr = state.system?.model_runtime || {};
   $('#stats').innerHTML = [
-    ['专题', c.topics || 0], ['运行中', c.active_runs || 0], ['队列', rt.queue_depth ?? '-'], ['僵尸任务', (rt.stale_run_ids || []).length], ['模型Host侧', mr.loaded ? fmtGiB(mr.cpu_ram_bytes) : '-'], ['模型显存', mr.loaded ? fmtGiB(mr.vram_bytes) : '-'], ['RAM模式', mr.load_mode || '-'], ['GPU预留', mr.fit_target_mib ? `${mr.fit_target_mib} MB` : '-'], ['视觉编码', mr.mmproj_gpu_offload === false ? 'CPU' : 'GPU'], ['上下文', mr.loaded ? mr.context_length : (state.system?.limits?.context_length || '-')], ['证据', c.sources || 0], ['知识 Claim', c.claims || 0], ['未解决冲突', c.open_conflicts || 0]
+    ['专题', c.topics || 0], ['运行中', c.active_runs || 0], ['队列', rt.queue_depth ?? '-'], ['僵尸任务', (rt.stale_run_ids || []).length], ['模型Host侧', mr.loaded ? fmtGiB(mr.cpu_ram_bytes) : '-'], ['模型显存', mr.loaded ? fmtGiB(mr.vram_bytes) : '-'], ['RAM模式', mr.load_mode || '-'], ['GPU预留', Number.isFinite(Number(mr.fit_target_mib)) ? `${mr.fit_target_mib} MB` : '-'], ['视觉编码', mr.mmproj_gpu_offload === false ? 'CPU' : 'GPU'], ['上下文', mr.loaded ? mr.context_length : (state.system?.limits?.context_length || '-')], ['证据', c.sources || 0], ['知识 Claim', c.claims || 0], ['未解决冲突', c.open_conflicts || 0]
   ].map(([label,value]) => `<div class="stat"><strong>${value}</strong><span>${label}</span></div>`).join('');
   const m = state.system?.model || {};
   const b = $('#modelBadge');

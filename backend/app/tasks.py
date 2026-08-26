@@ -32,6 +32,8 @@ celery_app = Celery("internetboard", broker=settings.redis_url, backend=settings
 celery_app.conf.update(
     timezone=settings.timezone,
     enable_utc=True,
+    task_ignore_result=True,
+    task_store_errors_even_if_ignored=False,
     task_track_started=True,
     task_acks_late=True,
     worker_prefetch_multiplier=1,
