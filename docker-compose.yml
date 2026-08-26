@@ -15,6 +15,9 @@ x-app-env: &app-env
   OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE}
   OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS}
   OLLAMA_JSON_RETRIES: ${OLLAMA_JSON_RETRIES}
+  OLLAMA_USE_MMAP: ${OLLAMA_USE_MMAP:-true}
+  OLLAMA_USE_MLOCK: ${OLLAMA_USE_MLOCK:-true}
+  OLLAMA_PIN_MODEL: ${OLLAMA_PIN_MODEL:-true}
   MAX_SEARCH_ROUNDS: ${MAX_SEARCH_ROUNDS}
   MAX_QUERIES_PER_ROUND: ${MAX_QUERIES_PER_ROUND}
   MAX_RESULTS_PER_QUERY: ${MAX_RESULTS_PER_QUERY}
@@ -76,7 +79,7 @@ services:
     container_name: internetboard-redis
     restart: unless-stopped
     logging: *default-logging
-    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--maxmemory-policy", "noeviction"]
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--save", "", "--maxmemory-policy", "noeviction"]
     environment:
       TZ: ${TZ}
     volumes:
@@ -93,6 +96,12 @@ services:
     pull_policy: always
     container_name: internetboard-ollama
     restart: unless-stopped
+    cap_add:
+      - IPC_LOCK
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
     logging: *default-logging
     environment:
       TZ: ${TZ}
@@ -136,7 +145,7 @@ services:
       OLLAMA_HOST: http://ollama:11434
       OLLAMA_MODEL: ${OLLAMA_MODEL}
     entrypoint: ["/bin/sh", "-c"]
-    command: ['ollama pull "$${OLLAMA_MODEL}"']
+    command: ['ollama show "$${OLLAMA_MODEL}" >/dev/null 2>&1 || ollama pull "$${OLLAMA_MODEL}"']
     networks: [internetboard]
 
   backend:

@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     ollama_keep_alive: str = "10m"
     ollama_timeout_seconds: int = 900
     ollama_json_retries: int = 3
+    ollama_use_mmap: bool = True
+    ollama_use_mlock: bool = True
+    ollama_pin_model: bool = True
     ollama_num_predict_chunk: int = 1200
     ollama_num_predict_synthesis: int = 1800
 

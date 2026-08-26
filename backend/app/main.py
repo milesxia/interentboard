@@ -115,6 +115,7 @@ def system_status() -> dict:
         "app": {"name": settings.app_name, "version": settings.app_version, "timezone": settings.timezone},
         "model": ollama.health(),
         "running_models": ollama.running_models(),
+        "model_runtime": ollama.resource_summary(),
         "runtime": runtime,
         "limits": {
             "context_length": settings.ollama_context_length,

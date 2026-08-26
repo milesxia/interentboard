@@ -53,6 +53,42 @@ class OllamaClient:
         except Exception:
             return []
 
+    def resource_summary(self) -> dict:
+        """Summarize Ollama's loaded-model memory split from /api/ps.
+
+        size - size_vram is the CPU/RAM-side model allocation reported by Ollama.
+        It is not the same metric as QTS process RSS when mmap is used; enabling
+        mlock is what asks the kernel to keep those mapped pages resident.
+        """
+        models = self.running_models()
+        if not models:
+            return {
+                "loaded": False,
+                "model": settings.ollama_model,
+                "size_bytes": 0,
+                "vram_bytes": 0,
+                "cpu_ram_bytes": 0,
+                "context_length": settings.ollama_context_length,
+                "mlock_requested": settings.ollama_use_mlock,
+                "mmap_requested": settings.ollama_use_mmap,
+                "pinned": settings.ollama_pin_model,
+            }
+        item = next((m for m in models if m.get("name") == settings.ollama_model or m.get("model") == settings.ollama_model), models[0])
+        size = int(item.get("size") or 0)
+        vram = int(item.get("size_vram") or 0)
+        return {
+            "loaded": True,
+            "model": item.get("name") or item.get("model") or settings.ollama_model,
+            "size_bytes": size,
+            "vram_bytes": vram,
+            "cpu_ram_bytes": max(0, size - vram),
+            "context_length": int(item.get("context_length") or settings.ollama_context_length),
+            "expires_at": item.get("expires_at"),
+            "mlock_requested": settings.ollama_use_mlock,
+            "mmap_requested": settings.ollama_use_mmap,
+            "pinned": settings.ollama_pin_model,
+        }
+
     def _chat_structured(
         self,
         response_model: type[T],
@@ -96,12 +132,14 @@ class OllamaClient:
                 "stream": False,
                 "think": False,
                 "format": schema,
-                "keep_alive": settings.ollama_keep_alive,
+                "keep_alive": -1 if settings.ollama_pin_model else settings.ollama_keep_alive,
                 "options": {
                     "temperature": 0.1,
                     "seed": 42,
                     "num_ctx": settings.ollama_context_length,
                     "num_predict": num_predict,
+                    "use_mmap": settings.ollama_use_mmap,
+                    "use_mlock": settings.ollama_use_mlock,
                     "repeat_penalty": 1.05,
                 },
             }

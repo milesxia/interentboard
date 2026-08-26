@@ -67,3 +67,37 @@ must("working-directory: backend" in workflow, "CI backend imports must run from
 must("wrong app package" in workflow and "backend app package:" in workflow, "CI must assert that imports resolve to backend/app")
 must("actions/checkout@v7" in workflow and "actions/setup-python@v7" in workflow, "CI action majors are not current")
 print("InternetBoard V4.1 CI/frontend invariants: PASS")
+
+
+# INTERNETBOARD_V4_3_RESTART_RECOVERY_CHECKS
+from pathlib import Path as _V43Path
+_runtime_v43 = _V43Path("backend/app/runtime.py").read_text(encoding="utf-8")
+_tasks_v43 = _V43Path("backend/app/tasks.py").read_text(encoding="utf-8")
+_compose_v43 = _V43Path("docker-compose.yml").read_text(encoding="utf-8")
+assert "def clear_transient_runtime_state" in _runtime_v43, "missing worker restart transient-state reset"
+assert "clear_transient_runtime_state()" in _tasks_v43, "worker_ready must reset old runtime metadata"
+assert "Worker startup recovery result" in _tasks_v43, "worker startup recovery must be observable"
+assert '"--save", ""' in _compose_v43, "Redis periodic RDB snapshots must be disabled when AOF is authoritative"
+assert 'ollama show "$${OLLAMA_MODEL}"' in _compose_v43, "model-init must use cached Ollama model before network pull"
+print("InternetBoard V4.3 restart-recovery invariants: PASS")
+
+
+# INTERNETBOARD_V4_4_MEMORY_RESIDENCY_CHECKS
+from pathlib import Path as _V44Path
+_cfg_v44 = _V44Path("backend/app/config.py").read_text(encoding="utf-8")
+_ollama_v44 = _V44Path("backend/app/ollama_client.py").read_text(encoding="utf-8")
+_search_v44 = _V44Path("backend/app/search.py").read_text(encoding="utf-8")
+_main_v44 = _V44Path("backend/app/main.py").read_text(encoding="utf-8")
+_front_v44 = _V44Path("frontend/app.js").read_text(encoding="utf-8")
+_compose_v44 = _V44Path("docker-compose.yml").read_text(encoding="utf-8")
+_env_v44 = _V44Path(".env.example").read_text(encoding="utf-8")
+assert "ollama_use_mlock" in _cfg_v44 and "ollama_pin_model" in _cfg_v44, "RAM residency settings missing"
+assert '"use_mlock": settings.ollama_use_mlock' in _ollama_v44, "Ollama mlock option missing"
+assert '"use_mmap": settings.ollama_use_mmap' in _ollama_v44, "Ollama mmap option missing"
+assert 'keep_alive": -1 if settings.ollama_pin_model' in _ollama_v44, "Ollama model pinning missing"
+assert "def resource_summary" in _ollama_v44 and "model_runtime" in _main_v44, "Ollama memory split status missing"
+assert "feedparser.loads" not in _search_v44 and "feedparser.parse" in _search_v44, "Bing RSS parser regression"
+assert "IPC_LOCK" in _compose_v44 and "memlock:" in _compose_v44, "Ollama container memlock capability missing"
+assert "OLLAMA_USE_MLOCK" in _compose_v44 and "OLLAMA_PIN_MODEL" in _env_v44, "Ollama residency env controls missing"
+assert "模型CPU/RAM侧" in _front_v44 and "模型显存" in _front_v44, "Frontend model memory split missing"
+print("InternetBoard V4.4 memory-residency invariants: PASS")

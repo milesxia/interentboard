@@ -102,7 +102,7 @@ def _search_bing_news_rss(query: str, limit: int) -> list[SearchResult]:
     with httpx.Client(timeout=settings.search_timeout_seconds, follow_redirects=True, headers=headers) as client:
         response = client.get(url)
         response.raise_for_status()
-    feed = feedparser.loads(response.text)
+    feed = feedparser.parse(response.content)
     results: list[SearchResult] = []
     for item in feed.entries[:limit]:
         link = item.get("link", "")

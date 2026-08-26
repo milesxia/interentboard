@@ -19,6 +19,7 @@ from .pipeline import execute_research_run, mark_run_failed
 from .runtime import (
     RunLease,
     clear_run_queued,
+    clear_transient_runtime_state,
     clear_worker,
     reserve_run_queue,
     run_runtime_state,
@@ -89,13 +90,17 @@ def _on_worker_ready(sender=None, **kwargs) -> None:
     global _worker_thread
     name = _worker_name(sender)
     _worker_stop.clear()
+
+    reset = clear_transient_runtime_state()
+    logger.info("Worker startup transient runtime reset: %s", reset)
+
     touch_worker(name)
     if not _worker_thread or not _worker_thread.is_alive():
         _worker_thread = threading.Thread(target=_worker_heartbeat_loop, args=(name,), name="worker-runtime-heartbeat", daemon=True)
         _worker_thread.start()
-    # Any task stranded by a previous worker/container restart is recovered here.
     try:
-        recover_stale_runs_once(reason="worker startup recovery")
+        recovered = recover_stale_runs_once(reason="worker startup recovery")
+        logger.info("Worker startup recovery result: %s", recovered)
     except Exception:
         logger.exception("Runtime recovery failed during worker startup")
 

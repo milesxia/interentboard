@@ -123,13 +123,36 @@ def clear_run_queued(run_id: int, task_id: str | None = None) -> None:
         pass
 
 
+def clear_transient_runtime_state() -> dict:
+    """Clear process-ephemeral run coordination metadata on worker boot.
+
+    ResearchRun rows in PostgreSQL are durable. Redis leases, heartbeats and
+    queued markers describe only the previous worker process. Redis AOF keeps
+    TTL keys across container restarts, so stale process metadata must be
+    discarded before startup recovery decides whether a run is alive.
+    """
+    out = {"deleted": 0, "keys": []}
+    try:
+        client = redis_client()
+        keys = list(client.scan_iter(match=f"{_PREFIX}:run:*", count=200))
+        if keys:
+            out["deleted"] = int(client.delete(*keys))
+            out["keys"] = keys[:50]
+        client.delete(_WORKER_KEY)
+    except RedisError as exc:
+        out["error"] = str(exc)
+    return out
+
+
 def run_runtime_state(run_id: int, terminal: bool = False) -> str:
     if terminal:
         return "terminal"
     try:
         client = redis_client()
         if client.exists(_run_heartbeat_key(run_id)) or client.exists(_run_lock_key(run_id)):
-            return "running"
+            # A run lease is only meaningful while the owning worker heartbeat
+            # is alive. Otherwise it belongs to a dead/recreated container.
+            return "running" if client.exists(_WORKER_KEY) else "stale"
         if client.exists(_run_queue_key(run_id)):
             return "queued"
     except RedisError:

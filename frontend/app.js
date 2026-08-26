@@ -22,12 +22,14 @@ async function api(path, options={}) {
 
 const statusClass = s => s === 'COMPLETED' ? 'good' : s === 'FAILED' ? 'bad' : ['WAITING'].includes(s) ? 'muted' : 'warn';
 const formatDate = v => v ? new Date(v).toLocaleString() : '-';
+const fmtGiB = v => Number(v||0) > 0 ? `${(Number(v)/1024/1024/1024).toFixed(2)} GB` : '-';
 
 function renderStats() {
   const c = state.system?.counts || {};
   const rt = state.system?.runtime || {};
+  const mr = state.system?.model_runtime || {};
   $('#stats').innerHTML = [
-    ['专题', c.topics || 0], ['运行中', c.active_runs || 0], ['队列', rt.queue_depth ?? '-'], ['僵尸任务', (rt.stale_run_ids || []).length], ['证据', c.sources || 0], ['知识 Claim', c.claims || 0], ['未解决冲突', c.open_conflicts || 0]
+    ['专题', c.topics || 0], ['运行中', c.active_runs || 0], ['队列', rt.queue_depth ?? '-'], ['僵尸任务', (rt.stale_run_ids || []).length], ['模型CPU/RAM侧', mr.loaded ? fmtGiB(mr.cpu_ram_bytes) : '-'], ['模型显存', mr.loaded ? fmtGiB(mr.vram_bytes) : '-'], ['上下文', mr.loaded ? mr.context_length : (state.system?.limits?.context_length || '-')], ['证据', c.sources || 0], ['知识 Claim', c.claims || 0], ['未解决冲突', c.open_conflicts || 0]
   ].map(([label,value]) => `<div class="stat"><strong>${value}</strong><span>${label}</span></div>`).join('');
   const m = state.system?.model || {};
   const b = $('#modelBadge');
