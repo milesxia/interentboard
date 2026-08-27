@@ -212,7 +212,12 @@ def run_topic(topic_id: int) -> ResearchRun:
         ensure_run_enqueued(active_id, reason="manual refresh")
         with session_scope() as session:
             return session.get(ResearchRun, active_id)
-    enqueue_run(run_id, reason="manual refresh")
+    task_id = enqueue_run(run_id, reason="manual refresh")
+    if not task_id:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Run {run_id} was created but could not enter the Celery queue",
+        )
     with session_scope() as session:
         return session.get(ResearchRun, run_id)
 
@@ -556,3 +561,56 @@ def graph(topic_id: int | None = None, limit: int = Query(default=300, ge=1, le=
             for r in relations
         ],
     }
+
+
+# BEGIN INTERNETBOARD V4.7 OBSERVABILITY
+# Production observability added after dd0795a. This block is intentionally
+# dependency-light so a failed refresh can be diagnosed from container logs.
+import logging as _ib_logging
+import os as _ib_os
+import time as _ib_time
+from fastapi import Request as _IBRequest
+
+_ib_trace_logger = _ib_logging.getLogger("internetboard.refresh")
+
+
+@app.get("/api/build")
+def internetboard_build_info():
+    return {
+        "service": "internetboard-backend",
+        "build_sha": _ib_os.environ.get("INTERNETBOARD_BUILD_SHA", "unknown"),
+        "build_time": _ib_os.environ.get("INTERNETBOARD_BUILD_TIME", "unknown"),
+        "release": "v4.7-refresh-chain",
+    }
+
+
+@app.middleware("http")
+async def internetboard_refresh_trace(request: _IBRequest, call_next):
+    path = request.url.path
+    trace = (
+        request.method == "POST"
+        and path.startswith("/api/topics/")
+        and path.endswith("/run")
+    )
+    started = _ib_time.monotonic()
+    if trace:
+        _ib_trace_logger.info("manual-refresh request received path=%s", path)
+    try:
+        response = await call_next(request)
+    except Exception:
+        if trace:
+            _ib_trace_logger.exception("manual-refresh request failed path=%s", path)
+        raise
+    if trace:
+        elapsed_ms = int((_ib_time.monotonic() - started) * 1000)
+        _ib_trace_logger.info(
+            "manual-refresh response path=%s status=%s elapsed_ms=%s",
+            path,
+            response.status_code,
+            elapsed_ms,
+        )
+        response.headers["X-InternetBoard-Build"] = _ib_os.environ.get(
+            "INTERNETBOARD_BUILD_SHA", "unknown"
+        )
+    return response
+# END INTERNETBOARD V4.7 OBSERVABILITY

@@ -21,3 +21,12 @@ RUN mkdir -p /data
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+
+
+# BEGIN INTERNETBOARD V4.7 BUILD FINGERPRINT
+ARG BUILD_SHA=unknown
+ARG BUILD_TIME=unknown
+ENV INTERNETBOARD_BUILD_SHA=${BUILD_SHA} \
+    INTERNETBOARD_BUILD_TIME=${BUILD_TIME}
+LABEL org.opencontainers.image.revision=${BUILD_SHA}
+# END INTERNETBOARD V4.7 BUILD FINGERPRINT

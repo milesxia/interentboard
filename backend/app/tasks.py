@@ -290,3 +290,28 @@ def check_website_watches() -> dict:
         if ensure_run_enqueued(run_id, reason="website watch found stale active run") == "requeued":
             recovered.append(run_id)
     return {"checked": checked, "changed_topics": sorted(changed_topics), "queued": queued, "recovered": recovered}
+
+
+# BEGIN INTERNETBOARD V4.7 ENQUEUE TRACE
+# Wrap the existing, already-tested enqueue implementation. Runtime callers
+# resolve this global name when they execute, so main.py, watchdog and schedule
+# paths all receive consistent enqueue diagnostics without changing queue logic.
+import logging as _ib_enqueue_logging
+
+_ib_enqueue_logger = _ib_enqueue_logging.getLogger("internetboard.enqueue")
+_ib_enqueue_run_impl = enqueue_run
+
+
+def enqueue_run(run_id: int, *, reason: str = "queued", ttl_seconds: int | None = None) -> str | None:
+    _ib_enqueue_logger.info("enqueue request run_id=%s reason=%s", run_id, reason)
+    try:
+        task_id = _ib_enqueue_run_impl(run_id, reason=reason, ttl_seconds=ttl_seconds)
+    except Exception:
+        _ib_enqueue_logger.exception("enqueue failed run_id=%s reason=%s", run_id, reason)
+        raise
+    if task_id:
+        _ib_enqueue_logger.info("enqueue accepted run_id=%s task_id=%s reason=%s", run_id, task_id, reason)
+    else:
+        _ib_enqueue_logger.warning("enqueue returned empty run_id=%s reason=%s", run_id, reason)
+    return task_id
+# END INTERNETBOARD V4.7 ENQUEUE TRACE
