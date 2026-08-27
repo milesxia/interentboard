@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>InternetBoard 情报中心</title>
+  <link rel="stylesheet" href="/insights.css?v=4.8-intelligence-center">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <div class="eyebrow">InternetBoard</div>
+      <h1>情报中心</h1>
+      <p>失败任务管理 · 当日总结 · 本地知识库 AI 问答</p>
+    </div>
+    <div class="top-actions">
+      <span id="buildBadge" class="badge">BUILD …</span>
+      <a class="button secondary" href="/">返回主面板</a>
+    </div>
+  </header>
+
+  <main>
+    <section class="panel">
+      <div class="section-head">
+        <div>
+          <h2>任务状态</h2>
+          <p>FAILED 是终态，不再占用“正在运行”；可从原 Run 重新入队并继续已有断点。</p>
+        </div>
+        <button id="refreshTasks" class="button secondary">刷新状态</button>
+      </div>
+      <div class="stats" id="taskStats"></div>
+      <div class="task-columns">
+        <div>
+          <h3>当前活跃</h3>
+          <div id="activeTasks" class="task-list"></div>
+        </div>
+        <div>
+          <h3>失败任务</h3>
+          <div id="failedTasks" class="task-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="section-head">
+        <div>
+          <h2>当日总结</h2>
+          <p>从当天已入库的 Run、Source、Claim、Entity、Relation 等证据生成，不调用云端 AI。</p>
+        </div>
+        <div class="inline-actions">
+          <input id="summaryDate" type="date">
+          <button id="loadSummary" class="button secondary">查看</button>
+          <button id="generateSummary" class="button">生成 / 重新生成</button>
+        </div>
+      </div>
+      <div id="summaryMeta" class="meta"></div>
+      <pre id="dailySummary" class="answer">选择日期后查看总结。</pre>
+    </section>
+
+    <section class="panel">
+      <div class="section-head">
+        <div>
+          <h2>本地知识库 AI 问答</h2>
+          <p>继续使用 Qwen3.8 27B。系统先从本地 PostgreSQL 证据中检索，再让模型基于证据回答。</p>
+        </div>
+      </div>
+      <div class="ask-box">
+        <textarea id="question" rows="5" placeholder="例如：三乐过去 30 天发生了什么变化？有哪些证据支持？下一步需要重点监控什么？"></textarea>
+        <div class="inline-actions align-right">
+          <button id="askButton" class="button">询问知识库</button>
+        </div>
+      </div>
+      <div id="askMeta" class="meta"></div>
+      <pre id="answer" class="answer">回答会显示在这里。</pre>
+      <details id="evidenceBox" class="evidence-box">
+        <summary>查看本次回答使用的本地证据</summary>
+        <div id="evidence"></div>
+      </details>
+    </section>
+  </main>
+
+  <div id="toast" class="toast"></div>
+  <script src="/insights.js?v=4.8-intelligence-center"></script>
+</body>
+</html>

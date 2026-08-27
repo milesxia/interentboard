@@ -580,7 +580,7 @@ def internetboard_build_info():
         "service": "internetboard-backend",
         "build_sha": _ib_os.environ.get("INTERNETBOARD_BUILD_SHA", "unknown"),
         "build_time": _ib_os.environ.get("INTERNETBOARD_BUILD_TIME", "unknown"),
-        "release": "v4.7-refresh-chain",
+        "release": "v4.8-intelligence-center",
     }
 
 
@@ -614,3 +614,10 @@ async def internetboard_refresh_trace(request: _IBRequest, call_next):
         )
     return response
 # END INTERNETBOARD V4.7 OBSERVABILITY
+
+
+# BEGIN INTERNETBOARD V4.8 INTELLIGENCE ROUTER
+from .intelligence import router as intelligence_router
+
+app.include_router(intelligence_router)
+# END INTERNETBOARD V4.8 INTELLIGENCE ROUTER
