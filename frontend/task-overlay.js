@@ -12,7 +12,7 @@
       if(q.all_complete_at)parts.push(`约 ${clock(q.all_complete_at)} 完成`);
       if(failed)parts.push(`失败 ${failed}`);
       link.textContent=parts.join(' · ');
-      link.title='单 AI 串行队列、ETA、卡死恢复、当日总结、本地知识库问答';
+      link.title='统一 AI 串行队列、ETA、卡死恢复、当日总结、本地知识库问答';
     }catch(_){}
   }
   refresh();setInterval(refresh,15000);

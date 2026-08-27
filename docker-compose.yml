@@ -54,6 +54,18 @@ x-app-env: &app-env
   WORKER_HEARTBEAT_TTL_SECONDS: ${WORKER_HEARTBEAT_TTL_SECONDS:-50}
   RUNTIME_WATCHDOG_SECONDS: ${RUNTIME_WATCHDOG_SECONDS:-60}
 
+
+  # INTERNETBOARD V4.10 SERIAL AI RUNTIME
+  QUEUE_DEFAULT_RUN_SECONDS: "3600"
+  STALL_PROGRESS_TIMEOUT_SECONDS: "1200"
+  AUTO_RECOVERY_MAX_ATTEMPTS: "2"
+  QUEUE_WATCHDOG_SECONDS: "60"
+  QUEUE_RECOVERY_DELAY_SECONDS: "210"
+  QUEUE_TASK_ID_TTL_SECONDS: "604800"
+  AI_JOB_TTL_SECONDS: "86400"
+  AI_QA_DEFAULT_SECONDS: "900"
+  AI_SUMMARY_DEFAULT_SECONDS: "1200"
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -103,7 +115,6 @@ services:
       OLLAMA_HOST: 0.0.0.0:11434
       OLLAMA_KEEP_ALIVE: "-1"
       OLLAMA_CONTEXT_LENGTH: "8192"
-      OLLAMA_MAX_LOADED_MODELS: "1"
       OLLAMA_FLASH_ATTENTION: "true"
       OLLAMA_KV_CACHE_TYPE: q8_0
       OLLAMA_GPU_OVERHEAD: "0"
@@ -191,7 +202,7 @@ services:
     environment: *app-env
     volumes:
       - ${APP_ROOT}/data:/data
-    command: ["celery", "-A", "app.tasks.celery_app", "worker", "--loglevel=INFO", "--prefetch-multiplier=1", "--without-mingle", "--without-gossip", "--without-heartbeat"]
+    command: ["celery", "-A", "app.tasks.celery_app", "worker", "--loglevel=INFO", "--prefetch-multiplier=1", "--without-mingle", "--without-gossip", "--without-heartbeat", "--concurrency=1", "--queues=research"]
     stop_grace_period: 2m
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.tasks.celery_app inspect ping -d celery@$$HOSTNAME --timeout=5 2>/dev/null | grep -q pong"]
@@ -200,6 +211,44 @@ services:
       retries: 3
       start_period: 60s
     networks: [internetboard]
+
+  # =========================================================
+  # Monitor / Control Worker - V4.10.2
+  # 独立监控卡死、恢复和控制任务，不参与重 AI 推理
+  # 网络/卷/环境自动继承 Research Worker 的真实配置
+  # =========================================================
+  monitor:
+    image: milesxia/internetboard-worker:latest
+    pull_policy: always
+    container_name: internetboard-monitor
+    restart: unless-stopped
+    logging: *default-logging
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment: *app-env
+    volumes:
+      - ${APP_ROOT}/data:/data
+    command:
+      - celery
+      - -A
+      - app.tasks.celery_app
+      - worker
+      - --loglevel=INFO
+      - --concurrency=1
+      - --queues=control
+      - --prefetch-multiplier=1
+      - --without-mingle
+      - --without-gossip
+    stop_grace_period: 2m
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.tasks.celery_app inspect ping -d celery@$$HOSTNAME --timeout=5 2>/dev/null | grep -q pong"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks: [internetboard]
+
 
   scheduler:
     image: milesxia/internetboard-scheduler:latest

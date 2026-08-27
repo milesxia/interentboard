@@ -316,50 +316,61 @@ def enqueue_run(run_id: int, *, reason: str = "queued", ttl_seconds: int | None 
     return task_id
 # END INTERNETBOARD V4.7 ENQUEUE TRACE
 
-
-# BEGIN INTERNETBOARD V4.9 SERIAL QUEUE
-# Heavy research runs are serialized on the research queue. Control/watchdog
-# tasks stay independently consumable so a stuck Qwen run cannot blind monitoring.
-import os as _v49_os
-from .queue_runtime import monitor_stalled_runs as _v49_monitor_stalled_runs
-from .queue_runtime import record_enqueued_task as _v49_record_enqueued_task
+# BEGIN INTERNETBOARD V4.10 AI SERIAL QUEUE
+# All heavy local-AI work shares the same research queue. The queue is consumed
+# by one worker process, while control/watchdog work is consumed independently.
+import os as _v410_os
+from .queue_runtime import monitor_stalled_runs as _v410_monitor_stalled_runs
+from .queue_runtime import record_enqueued_task as _v410_record_enqueued_task
 
 celery_app.conf.task_default_queue = "control"
-celery_app.conf.task_routes = {
+try:
+    _v410_routes = dict(celery_app.conf.task_routes or {})
+except Exception:
+    _v410_routes = {}
+_v410_routes.update({
     "internetboard.run_research": {"queue": "research"},
+    "internetboard.intelligence_daily_summary_v410": {"queue": "research"},
+    "internetboard.intelligence_qa_v410": {"queue": "research"},
     "internetboard.run_all_topics": {"queue": "control"},
     "internetboard.check_website_watches": {"queue": "control"},
     "internetboard.runtime_watchdog": {"queue": "control"},
-    "internetboard.queue_watchdog_v49": {"queue": "control"},
-    "internetboard.requeue_stalled_v49": {"queue": "control"},
-}
+    "internetboard.queue_watchdog_v410": {"queue": "control"},
+    "internetboard.requeue_stalled_v410": {"queue": "control"},
+})
+celery_app.conf.task_routes = _v410_routes
 
-_v49_beat = dict(celery_app.conf.beat_schedule or {})
-_v49_beat["v49-progress-watchdog"] = {
-    "task": "internetboard.queue_watchdog_v49",
-    "schedule": float(_v49_os.getenv("QUEUE_WATCHDOG_SECONDS", "60")),
+_v410_beat = dict(celery_app.conf.beat_schedule or {})
+_v410_beat["v410-progress-watchdog"] = {
+    "task": "internetboard.queue_watchdog_v410",
+    "schedule": float(_v410_os.getenv("QUEUE_WATCHDOG_SECONDS", "60")),
     "options": {"queue": "control"},
 }
-celery_app.conf.beat_schedule = _v49_beat
+celery_app.conf.beat_schedule = _v410_beat
 
-# Wrap the V4.7 enqueue implementation only to persist the task id used by
-# progress recovery. Existing queue marker / locking semantics stay intact.
-_v49_enqueue_impl = enqueue_run
-
+_v410_enqueue_impl = enqueue_run
 
 def enqueue_run(run_id: int, *, reason: str = "queued", ttl_seconds: int | None = None) -> str | None:
-    task_id = _v49_enqueue_impl(run_id, reason=reason, ttl_seconds=ttl_seconds)
-    _v49_record_enqueued_task(run_id, task_id)
+    task_id = _v410_enqueue_impl(run_id, reason=reason, ttl_seconds=ttl_seconds)
+    _v410_record_enqueued_task(run_id, task_id)
     return task_id
 
+@celery_app.task(name="internetboard.queue_watchdog_v410")
+def queue_watchdog_v410() -> dict:
+    return _v410_monitor_stalled_runs(celery_app)
 
-@celery_app.task(name="internetboard.queue_watchdog_v49")
-def queue_watchdog_v49() -> dict:
-    return _v49_monitor_stalled_runs(celery_app)
-
-
-@celery_app.task(name="internetboard.requeue_stalled_v49")
-def requeue_stalled_v49(run_id: int, attempt: int = 1) -> dict:
-    result = ensure_run_enqueued(run_id, reason=f"v4.9 stalled recovery {attempt}")
+@celery_app.task(name="internetboard.requeue_stalled_v410")
+def requeue_stalled_v410(run_id: int, attempt: int = 1) -> dict:
+    result = ensure_run_enqueued(run_id, reason=f"v4.10 stalled recovery {attempt}")
     return {"run_id": run_id, "attempt": attempt, "enqueue_result": result}
-# END INTERNETBOARD V4.9 SERIAL QUEUE
+
+@celery_app.task(name="internetboard.intelligence_daily_summary_v410")
+def intelligence_daily_summary_v410(job_id: str, day: str) -> dict:
+    from .intelligence import execute_daily_summary_job
+    return execute_daily_summary_job(job_id, day)
+
+@celery_app.task(name="internetboard.intelligence_qa_v410")
+def intelligence_qa_v410(job_id: str, payload: dict) -> dict:
+    from .intelligence import execute_knowledge_qa_job
+    return execute_knowledge_qa_job(job_id, payload)
+# END INTERNETBOARD V4.10 AI SERIAL QUEUE

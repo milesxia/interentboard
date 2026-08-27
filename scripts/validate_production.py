@@ -104,7 +104,7 @@ must("llama_arg_fit_target: int = 0" in config, "backend fit-target default mism
 must("llama_arg_mmproj_offload: bool = True" in config, "backend projector default mismatch")
 
 # No artificial compute/container caps added by this release.
-must("--concurrency=1" not in compose, "Celery worker must not be pinned to one process")
+pass  # V4.10.2: legacy anti-serial rule superseded by canonical serial queue contract
 must("--max-tasks-per-child" not in compose, "Do not recycle workers on an artificial task-count cap")
 must("--without-mingle" in compose and "--without-gossip" in compose and "--without-heartbeat" in compose, "Single-node Celery restart hardening missing")
 must("task_ignore_result=True" in tasks, "Celery task results must not add unnecessary Redis traffic")
@@ -113,3 +113,27 @@ must("limits:" not in compose, "Compose resource limits are not allowed")
 must("VmRSS" in diag and "GGML_CUDA_ENABLE_UNIFIED_MEMORY" in diag and "LLAMA_ARG_N_GPU_LAYERS" in diag, "QNAP UVM runtime diagnostic missing")
 
 print("InternetBoard FINAL GPU-first UVM production invariants: PASS")
+
+# BEGIN INTERNETBOARD V4.10.2 SERIAL PRODUCTION CONTRACT
+# Heavy local-AI work shares one Celery research queue consumed by one process.
+# Control/watchdog work remains independent. Ollama/qwen35 scheduling is not overridden.
+import yaml as _v4102_yaml
+from pathlib import Path as _V4102Path
+_v4102_compose = _v4102_yaml.safe_load(_V4102Path("docker-compose.yml").read_text(encoding="utf-8"))
+_v4102_services = _v4102_compose["services"]
+_v4102_worker = " ".join(str(x) for x in _v4102_services["worker"]["command"])
+assert "--concurrency=1" in _v4102_worker, "V4.10.2 research worker must be serial"
+assert "--queues=research" in _v4102_worker, "V4.10.2 research worker must consume research queue"
+assert "--prefetch-multiplier=1" in _v4102_worker, "V4.10.2 research worker prefetch must remain one"
+assert "monitor" in _v4102_services, "V4.10.2 monitor service missing"
+_v4102_monitor = " ".join(str(x) for x in _v4102_services["monitor"]["command"])
+assert "--concurrency=1" in _v4102_monitor, "V4.10.2 monitor worker must be single-process"
+assert "--queues=control" in _v4102_monitor, "V4.10.2 monitor worker must consume control queue"
+assert _v4102_services["worker"].get("networks") == _v4102_services["monitor"].get("networks"), "V4.10.2 monitor networks must match research worker"
+assert _v4102_services["worker"].get("network_mode") == _v4102_services["monitor"].get("network_mode"), "V4.10.2 monitor network_mode must match research worker"
+_v4102_ollama_env = _v4102_services["ollama"].get("environment") or {}
+assert "OLLAMA_NUM_PARALLEL" not in _v4102_ollama_env, "Ollama scheduler parallelism must not be overridden"
+assert "OLLAMA_MAX_QUEUE" not in _v4102_ollama_env, "Ollama scheduler queue limit must not be overridden"
+assert "OLLAMA_MAX_LOADED_MODELS" not in _v4102_ollama_env, "Ollama loaded-model scheduler must not be overridden"
+print("InternetBoard V4.10.2 serial production contract: PASS")
+# END INTERNETBOARD V4.10.2 SERIAL PRODUCTION CONTRACT
