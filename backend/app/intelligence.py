@@ -29,6 +29,7 @@ from .queue_runtime import (
     reset_recovery_state,
     set_ai_job_task_id,
 )
+from .shanghai_intel import local_coverage
 
 logger = logging.getLogger("internetboard.intelligence")
 router = APIRouter(prefix="/api/intelligence", tags=["intelligence"])
@@ -392,6 +393,27 @@ def _summary_file(target: date) -> Path:
     return SUMMARY_DIR / f"{target.isoformat()}.json"
 
 
+@router.get("/local/coverage")
+def get_local_coverage(day: str | None = Query(default=None)):
+    try:
+        return local_coverage(day)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD") from exc
+
+
+@router.post("/local/collect", status_code=202)
+def enqueue_local_collection(day: str | None = Query(default=None)):
+    target = day or datetime.now(TZ).date().isoformat()
+    try:
+        date.fromisoformat(target)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD") from exc
+    result = celery_app.send_task(
+        "internetboard.local_source_sweep_v411", args=[target], queue="collect"
+    )
+    return {"status": "queued", "date": target, "task_id": getattr(result, "id", None)}
+
+
 @router.get("/daily/{day}")
 def get_daily_summary(day: str):
     try:
@@ -419,14 +441,20 @@ def _generate_daily_summary_sync(day: str) -> dict[str, Any]:
     if not context:
         context = "当天数据库中没有可用于总结的情报记录。"
     system_prompt = (
-        "你是 InternetBoard 的本地情报分析员。只能依据提供的本地数据库证据总结，不要补造事实。"
+        "你是 InternetBoard 的上海本地情报分析员。只能依据提供的本地数据库证据总结，不要补造事实。"
+        "优先上海市级、16区区级、街镇社区官方信息；全国泛资讯仅在对上海有直接影响时作为背景。"
+        "三乐专题必须按静安区→江宁路街道→三乐里居民区/三乐小区的地理链条理解。"
         "输出中文 Markdown。所有重要判断尽量使用 [D编号] 标注证据。"
     )
     user_prompt = (
-        f"请对 {target.isoformat()} 的本地情报库生成当日总结。\n\n"
-        "固定结构：\n# 当日结论\n## 1. 今日发生了什么\n## 2. 关键新增 Claim / Entity / Relation\n"
-        "## 3. 趋势与变化\n## 4. 风险、矛盾与信息缺口\n## 5. 明日/后续重点监控\n"
-        "## 6. 任务运行质量（包括失败任务对结论完整性的影响）\n\n"
+        f"请对 {target.isoformat()} 的上海本地情报库生成最终日报。\n\n"
+        "全国泛资讯不是重点，只保留对上海有直接落地影响的上位政策。固定结构：\n"
+        "# 上海每日情报报告\n## 1. 今日上海最重要变化\n## 2. 上海市级政策与监管动态\n"
+        "## 3. 上海16区重要动态\n## 4. 街镇/社区重要动态\n"
+        "## 5. 三乐专项（静安区→江宁路街道→三乐里居民区/三乐小区）\n"
+        "## 6. 重点企业、项目与产业变化\n## 7. 与昨日/历史相比的变化\n"
+        "## 8. 风险、矛盾与信息缺口\n## 9. 明日/后续重点监控\n"
+        "## 10. 任务运行质量（包括失败任务对结论完整性的影响）\n\n"
         f"本地证据：\n{context}"
     )
     summary, elapsed = _ollama_chat(system_prompt, user_prompt, temperature=0.15)
@@ -518,7 +546,8 @@ def _ask_knowledge_sync(payload: dict[str, Any]) -> dict[str, Any]:
     evidence = _retrieve(question, body.max_evidence, topic_id=body.topic_id, days=body.days)
     context = "\n".join(f"[{item['ref']}] {item['text']}" for item in evidence)[:24000]
     system_prompt = (
-        "你是 InternetBoard 的本地知识库问答助手。你只能基于给出的本地证据回答。"
+        "你是 InternetBoard 的上海本地知识库问答助手。你只能基于给出的本地证据回答。"
+        "优先使用上海市级、16区区级和街镇社区证据；三乐相关问题重点关联静安区、江宁路街道、三乐里居民区/三乐小区。"
         "如果证据不足，明确写‘现有知识库不足以确认’，不要用常识补齐。"
         "重要事实、趋势判断和预测必须尽量引用 [K编号]。需要区分：事实、推断、预测。回答使用中文。"
     )

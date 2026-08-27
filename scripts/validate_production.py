@@ -137,3 +137,26 @@ assert "OLLAMA_MAX_QUEUE" not in _v4102_ollama_env, "Ollama scheduler queue limi
 assert "OLLAMA_MAX_LOADED_MODELS" not in _v4102_ollama_env, "Ollama loaded-model scheduler must not be overridden"
 print("InternetBoard V4.10.2 serial production contract: PASS")
 # END INTERNETBOARD V4.10.2 SERIAL PRODUCTION CONTRACT
+
+# BEGIN INTERNETBOARD V4.11 SHANGHAI LOCAL PRODUCTION CONTRACT
+import yaml as _v411_yaml
+from pathlib import Path as _V411Path
+_v411_compose = _v411_yaml.safe_load(_V411Path("docker-compose.yml").read_text(encoding="utf-8"))
+_v411_services = _v411_compose["services"]
+assert "collector" in _v411_services, "V4.11 Shanghai collector service missing"
+_v411_collector = " ".join(str(x) for x in _v411_services["collector"]["command"])
+assert "--queues=collect" in _v411_collector and "--concurrency=1" in _v411_collector, "V4.11 collector queue contract broken"
+_v411_worker = " ".join(str(x) for x in _v411_services["worker"]["command"])
+assert "--queues=research" in _v411_worker and "--concurrency=1" in _v411_worker, "V4.11 research AI must remain serial"
+_v411_monitor = " ".join(str(x) for x in _v411_services["monitor"]["command"])
+assert "--queues=control" in _v411_monitor, "V4.11 monitor must remain independent"
+assert _v411_services["collector"].get("networks") == _v411_services["worker"].get("networks"), "V4.11 collector networks must match worker"
+assert _v411_services["collector"].get("network_mode") == _v411_services["worker"].get("network_mode"), "V4.11 collector network_mode must match worker"
+_v411_ollama = _v411_services["ollama"].get("environment") or {}
+for _v411_key in ("OLLAMA_NUM_PARALLEL", "OLLAMA_MAX_QUEUE", "OLLAMA_MAX_LOADED_MODELS"):
+    assert _v411_key not in _v411_ollama, f"V4.11 must not override Ollama scheduler: {_v411_key}"
+_v411_local = _V411Path("backend/app/shanghai_intel.py").read_text(encoding="utf-8")
+assert "江宁路街道" in _v411_local and "三乐里居民区" in _v411_local and "In江宁" in _v411_local, "V4.11 Sanle/Jiangning local policy missing"
+assert "local_source_evidence" in _v411_local and "EXCLUDED_HOSTS" in _v411_local, "V4.11 Shanghai local evidence/filter layer missing"
+print("InternetBoard V4.11 Shanghai-local production contract: PASS")
+# END INTERNETBOARD V4.11 SHANGHAI LOCAL PRODUCTION CONTRACT

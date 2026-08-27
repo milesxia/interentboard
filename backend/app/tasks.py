@@ -374,3 +374,102 @@ def intelligence_qa_v410(job_id: str, payload: dict) -> dict:
     from .intelligence import execute_knowledge_qa_job
     return execute_knowledge_qa_job(job_id, payload)
 # END INTERNETBOARD V4.10 AI SERIAL QUEUE
+
+# BEGIN INTERNETBOARD V4.11 SHANGHAI LOCAL
+# Daily automation is Shanghai-local-first. The legacy generic run_all_topics task remains
+# callable manually, but is removed from Celery Beat so the 03:00 automatic pipeline does
+# not re-introduce nationwide generic results. Web/CPU collection is isolated from the
+# single-process research AI queue; final report generation waits until that AI queue settles.
+import os as _v411_os
+from datetime import datetime as _v411_datetime
+from zoneinfo import ZoneInfo as _v411_ZoneInfo
+from celery.schedules import crontab as _v411_crontab
+
+try:
+    _v411_routes = dict(celery_app.conf.task_routes or {})
+except Exception:
+    _v411_routes = {}
+_v411_routes.update({
+    "internetboard.local_source_sweep_v411": {"queue": "collect"},
+    "internetboard.local_intel_digest_v411": {"queue": "research"},
+    "internetboard.daily_report_finalize_v411": {"queue": "control"},
+})
+celery_app.conf.task_routes = _v411_routes
+
+# Retire ONLY the automatic generic all-topic sweep. Manual refresh/run routes still work.
+_v411_beat = {
+    k: v for k, v in dict(celery_app.conf.beat_schedule or {}).items()
+    if (v or {}).get("task") != "internetboard.run_all_topics"
+}
+_v411_beat["v411-shanghai-local-0300"] = {
+    "task": "internetboard.local_source_sweep_v411",
+    "schedule": _v411_crontab(hour=3, minute=0),
+    "options": {"queue": "collect"},
+}
+_v411_beat["v411-daily-report-finalizer"] = {
+    "task": "internetboard.daily_report_finalize_v411",
+    "schedule": 300.0,
+    "options": {"queue": "control"},
+}
+celery_app.conf.beat_schedule = _v411_beat
+
+
+def _v411_day() -> str:
+    tz = _v411_ZoneInfo(_v411_os.getenv("TZ", "Asia/Shanghai"))
+    return _v411_datetime.now(tz).date().isoformat()
+
+
+@celery_app.task(name="internetboard.local_source_sweep_v411")
+def local_source_sweep_v411(day: str | None = None) -> dict:
+    from .shanghai_intel import collect_local_evidence
+    from .queue_runtime import create_ai_job, fail_ai_job, set_ai_job_task_id
+
+    target = day or _v411_day()
+    report = collect_local_evidence(target)
+    if report.get("skipped"):
+        return report
+
+    job = create_ai_job("local_digest_v411", {"day": target}, f"上海本地新增情报 · {target}")
+    try:
+        result = celery_app.send_task(
+            "internetboard.local_intel_digest_v411",
+            args=[job["job_id"], target],
+            queue="research",
+        )
+        set_ai_job_task_id(job["job_id"], getattr(result, "id", None))
+    except Exception as exc:
+        fail_ai_job(job["job_id"], f"enqueue local digest failed: {exc}")
+        raise
+    return {"date": target, "collection": report, "digest_job_id": job["job_id"], "digest_task_id": getattr(result, "id", None)}
+
+
+@celery_app.task(name="internetboard.local_intel_digest_v411")
+def local_intel_digest_v411(job_id: str, day: str) -> dict:
+    from .shanghai_intel import execute_local_digest_job
+    return execute_local_digest_job(job_id, day)
+
+
+@celery_app.task(name="internetboard.daily_report_finalize_v411")
+def daily_report_finalize_v411(day: str | None = None) -> dict:
+    from .shanghai_intel import daily_report_ready, mark_daily_report_enqueued
+    from .queue_runtime import create_ai_job, fail_ai_job, set_ai_job_task_id
+
+    target = day or _v411_day()
+    ready, state = daily_report_ready(target)
+    if not ready:
+        return state
+
+    job = create_ai_job("daily_summary_auto_v411", {"day": target}, f"上海每日情报报告 · {target}")
+    try:
+        result = celery_app.send_task(
+            "internetboard.intelligence_daily_summary_v410",
+            args=[job["job_id"], target],
+            queue="research",
+        )
+        set_ai_job_task_id(job["job_id"], getattr(result, "id", None))
+        mark_daily_report_enqueued(target)
+    except Exception as exc:
+        fail_ai_job(job["job_id"], f"enqueue daily report failed: {exc}")
+        raise
+    return {"date": target, "status": "queued", "job_id": job["job_id"], "task_id": getattr(result, "id", None)}
+# END INTERNETBOARD V4.11 SHANGHAI LOCAL

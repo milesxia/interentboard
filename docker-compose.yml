@@ -66,6 +66,19 @@ x-app-env: &app-env
   AI_QA_DEFAULT_SECONDS: "900"
   AI_SUMMARY_DEFAULT_SECONDS: "1200"
 
+
+  # BEGIN INTERNETBOARD V4.11 SHANGHAI LOCAL ENV
+  LOCAL_INTEL_TIME_RANGE: "day"
+  LOCAL_INTEL_RESULTS_PER_QUERY: "3"
+  LOCAL_INTEL_MAX_TOPICS: "12"
+  LOCAL_INTEL_MAX_QUERIES_PER_TOPIC: "40"
+  LOCAL_INTEL_FETCH_TIMEOUT_SECONDS: "20"
+  LOCAL_INTEL_QUERY_DELAY_SECONDS: "0.35"
+  LOCAL_INTEL_MIN_SCORE: "60"
+  LOCAL_INTEL_MAX_CONTENT_CHARS: "12000"
+  DAILY_REPORT_NOT_BEFORE_MINUTE: "15"
+  # END INTERNETBOARD V4.11 SHANGHAI LOCAL ENV
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -249,6 +262,50 @@ services:
       start_period: 60s
     networks: [internetboard]
 
+
+  # =========================================================
+  # Shanghai Local Collector - V4.11
+  # 市级/16区/街镇社区 Web 采集与 CPU 预过滤；不执行 Qwen 重推理。
+  # 三乐专题额外定向 静安区 -> 江宁路街道 -> 三乐里 / In江宁。
+  # =========================================================
+  collector:
+    image: milesxia/internetboard-worker:latest
+    pull_policy: always
+    container_name: internetboard-collector
+    restart: unless-stopped
+    logging: *default-logging
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment: *app-env
+    volumes:
+      - ${APP_ROOT}/data:/data
+    command:
+      - celery
+      - -A
+      - app.tasks.celery_app
+      - worker
+      - --loglevel=INFO
+      - --concurrency=1
+      - --queues=collect
+      - --prefetch-multiplier=1
+      - --without-mingle
+      - --without-gossip
+      - --without-heartbeat
+    stop_grace_period: 2m
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.tasks.celery_app inspect ping -d celery@$$HOSTNAME --timeout=5 2>/dev/null | grep -q pong"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks: [internetboard]
+
+  # =========================================================
+  # Monitor / Control Worker - V4.10.2
+  # 独立监控卡死、恢复和控制任务，不参与重 AI 推理
+  # 网络/卷/环境自动继承 Research Worker 的真实配置
+  # =========================================================
 
   scheduler:
     image: milesxia/internetboard-scheduler:latest

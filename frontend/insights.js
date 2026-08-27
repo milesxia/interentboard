@@ -35,3 +35,36 @@ async function askKnowledge(){const question=$('question').value.trim();if(quest
 document.querySelectorAll('.tab').forEach((button)=>button.addEventListener('click',()=>{document.querySelectorAll('.tab').forEach((b)=>b.classList.toggle('active',b===button));document.querySelectorAll('.workspace').forEach((el)=>el.classList.remove('active'));$(`tab-${button.dataset.tab}`).classList.add('active');}));
 $('refreshTasks').addEventListener('click',()=>loadTasks().catch((e)=>toast(e.message,true)));$('loadSummary').addEventListener('click',loadDaily);$('generateSummary').addEventListener('click',generateDaily);$('askButton').addEventListener('click',askKnowledge);$('question').addEventListener('keydown',(event)=>{if((event.ctrlKey||event.metaKey)&&event.key==='Enter')askKnowledge();});
 const now=new Date();$('summaryDate').value=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;loadBuild();loadTasks().catch((e)=>toast(e.message,true));loadDaily();setInterval(()=>loadTasks().catch(()=>{}),15000);
+
+
+async function loadLocalCoverage(){
+  try{
+    const day=$('summaryDate')?.value||new Date().toISOString().slice(0,10);
+    const d=await api(`/api/intelligence/local/coverage?day=${encodeURIComponent(day)}`);
+    $('localTotal').textContent=d.total??0;
+    $('localDistricts').textContent=`${Object.keys(d.by_district||{}).length}/16`;
+    $('localSanle').textContent=d.sanle_jiangning_count??0;
+    if(d.collector){
+      $('localCollector').textContent='已完成';
+      $('localCollectorSub').textContent=`查询 ${d.collector.queries??0} · 新增 ${d.collector.inserted??0} · 去重 ${d.collector.duplicates??0}`;
+    }else{
+      $('localCollector').textContent='等待';
+      $('localCollectorSub').textContent='每日 03:00 自动采集，也可手动触发';
+    }
+  }catch(err){
+    $('localCollector').textContent='异常';
+    $('localCollectorSub').textContent=err.message;
+  }
+}
+async function runLocalCollect(){
+  const btn=$('runLocalCollect');btn.disabled=true;btn.textContent='已加入采集队列…';
+  try{
+    const day=$('summaryDate')?.value||new Date().toISOString().slice(0,10);
+    const r=await api(`/api/intelligence/local/collect?day=${encodeURIComponent(day)}`,{method:'POST'});
+    toast(`上海本地采集已排队：${r.task_id||'queued'}`);
+    setTimeout(loadLocalCoverage,3000);
+  }catch(err){toast(err.message,true);}finally{btn.disabled=false;btn.textContent='立即采集上海本地源';}
+}
+$('runLocalCollect')?.addEventListener('click',runLocalCollect);
+loadLocalCoverage();
+setInterval(loadLocalCoverage,60000);

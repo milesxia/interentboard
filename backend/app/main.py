@@ -580,7 +580,7 @@ def internetboard_build_info():
         "service": "internetboard-backend",
         "build_sha": _ib_os.environ.get("INTERNETBOARD_BUILD_SHA", "unknown"),
         "build_time": _ib_os.environ.get("INTERNETBOARD_BUILD_TIME", "unknown"),
-        "release": "v4.10.2-production-reconcile",
+        "release": "v4.11-shanghai-local-intelligence",
     }
 
 

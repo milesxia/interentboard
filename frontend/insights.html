@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>InternetBoard 运行看板</title>
-  <link rel="stylesheet" href="/insights.css?v=4.10-production-reconcile">
+  <link rel="stylesheet" href="/insights.css?v=4.11-shanghai-local">
 </head>
 <body>
   <header class="topbar">
@@ -110,6 +110,22 @@
       </details>
     </section>
 
+    <section class="panel" id="localIntelPanel">
+      <div class="section-head">
+        <div>
+          <h2>上海本地采集</h2>
+          <p>上海市级 + 16区区级 + 街镇定向源；全国泛媒体默认不进入主采集池。三乐专项固定覆盖静安区、江宁路街道、三乐里居民区/三乐小区及“In江宁”索引内容。</p>
+        </div>
+        <button id="runLocalCollect" class="button secondary">立即采集上海本地源</button>
+      </div>
+      <div class="overview-grid">
+        <div class="metric-card"><span>今日本地证据</span><strong id="localTotal">0</strong><small>去重、地域过滤后的有效内容</small></div>
+        <div class="metric-card"><span>覆盖区级</span><strong id="localDistricts">0/16</strong><small>上海16区政策/公告/新闻</small></div>
+        <div class="metric-card"><span>三乐·江宁路</span><strong id="localSanle">0</strong><small>静安区 → 江宁路街道 → 三乐里</small></div>
+        <div class="metric-card"><span>采集状态</span><strong id="localCollector">—</strong><small id="localCollectorSub">等待每日 03:00</small></div>
+      </div>
+    </section>
+
     <nav class="workspace-tabs" aria-label="情报工作区">
       <button class="tab active" data-tab="daily">当日总结</button>
       <button class="tab" data-tab="qa">知识库 AI 问答</button>
@@ -152,6 +168,6 @@
   </main>
 
   <div id="toast" class="toast"></div>
-  <script src="/insights.js?v=4.10-production-reconcile"></script>
+  <script src="/insights.js?v=4.11-shanghai-local"></script>
 </body>
 </html>
