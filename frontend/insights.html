@@ -3,49 +3,123 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>InternetBoard 情报中心</title>
-  <link rel="stylesheet" href="/insights.css?v=4.8-intelligence-center">
+  <title>InternetBoard 运行看板</title>
+  <link rel="stylesheet" href="/insights.css?v=4.9-serial-queue">
 </head>
 <body>
   <header class="topbar">
-    <div>
-      <div class="eyebrow">InternetBoard</div>
-      <h1>情报中心</h1>
-      <p>失败任务管理 · 当日总结 · 本地知识库 AI 问答</p>
+    <div class="brand">
+      <div class="eyebrow">InternetBoard · Local Intelligence</div>
+      <h1>运行看板</h1>
+      <p>单任务 AI 串行队列 · ETA · 自动卡死恢复 · 当日总结 · 本地知识库问答</p>
     </div>
     <div class="top-actions">
+      <span id="serialBadge" class="badge good">AI 串行 1×</span>
       <span id="buildBadge" class="badge">BUILD …</span>
       <a class="button secondary" href="/">返回主面板</a>
     </div>
   </header>
 
   <main>
-    <section class="panel">
-      <div class="section-head">
-        <div>
-          <h2>任务状态</h2>
-          <p>FAILED 是终态，不再占用“正在运行”；可从原 Run 重新入队并继续已有断点。</p>
-        </div>
-        <button id="refreshTasks" class="button secondary">刷新状态</button>
+    <section class="overview-grid" aria-label="运行概览">
+      <div class="metric-card accent">
+        <span>当前任务</span>
+        <strong id="metricCurrent">—</strong>
+        <small id="metricCurrentSub">等待数据</small>
       </div>
-      <div class="stats" id="taskStats"></div>
-      <div class="task-columns">
-        <div>
-          <h3>当前活跃</h3>
-          <div id="activeTasks" class="task-list"></div>
-        </div>
-        <div>
-          <h3>失败任务</h3>
-          <div id="failedTasks" class="task-list"></div>
-        </div>
+      <div class="metric-card">
+        <span>排队任务</span>
+        <strong id="metricQueued">0</strong>
+        <small>严格 FIFO，AI 一次只跑 1 个</small>
+      </div>
+      <div class="metric-card">
+        <span>全部预计完成</span>
+        <strong id="metricEta">—</strong>
+        <small id="metricEtaSub">基于历史耗时动态估算</small>
+      </div>
+      <div class="metric-card danger-lite">
+        <span>失败任务</span>
+        <strong id="metricFailed">0</strong>
+        <small id="metricFailedSub">自动恢复最多 2 次</small>
       </div>
     </section>
 
-    <section class="panel">
+    <section class="panel queue-panel">
+      <div class="section-head">
+        <div>
+          <h2>AI 串行任务队列</h2>
+          <p>Research Worker 固定并发 1；Monitor Worker 独立监控，不会被 27B 推理任务占住。</p>
+        </div>
+        <button id="refreshTasks" class="button secondary">刷新状态</button>
+      </div>
+
+      <div id="runtimeWarning" class="runtime-warning hidden"></div>
+
+      <div class="current-grid">
+        <article class="current-card" id="currentCard">
+          <div class="current-header">
+            <div>
+              <span class="label">正在执行</span>
+              <h3 id="currentTitle">当前没有运行任务</h3>
+            </div>
+            <span id="currentStatus" class="status running">IDLE</span>
+          </div>
+          <div class="progress-shell"><div id="currentProgress" class="progress-bar" style="width:0%"></div></div>
+          <div class="progress-row">
+            <strong id="currentProgressText">0%</strong>
+            <span id="currentEta">预计完成：—</span>
+          </div>
+          <div id="currentMeta" class="current-meta">等待任务进入队列。</div>
+        </article>
+
+        <aside class="monitor-card">
+          <span class="label">自动监控策略</span>
+          <div class="monitor-row"><span>无实际进度阈值</span><strong id="stallThreshold">20 分钟</strong></div>
+          <div class="monitor-row"><span>自动恢复次数</span><strong id="recoveryLimit">2 次</strong></div>
+          <div class="monitor-row"><span>研究并发</span><strong>1</strong></div>
+          <div class="monitor-row"><span>模型并发</span><strong>1</strong></div>
+          <p>超过阈值会终止旧 Celery task，等待锁过期后从原 Run/断点重新排队；超过上限才进入 FAILED。</p>
+        </aside>
+      </div>
+
+      <div class="table-head">
+        <div>
+          <h3>等待队列</h3>
+          <p id="estimateNote">ETA 正在计算。</p>
+        </div>
+      </div>
+      <div class="queue-table-wrap">
+        <table class="queue-table">
+          <thead>
+            <tr>
+              <th>顺位</th>
+              <th>Run</th>
+              <th>专题</th>
+              <th>状态</th>
+              <th>预计开始</th>
+              <th>预计完成</th>
+            </tr>
+          </thead>
+          <tbody id="queueBody"><tr><td colspan="6" class="empty-cell">当前没有排队任务。</td></tr></tbody>
+        </table>
+      </div>
+
+      <details class="failed-box" id="failedBox">
+        <summary><span>失败任务</span><span id="failedSummary">0 个</span></summary>
+        <div id="failedTasks" class="failed-list"></div>
+      </details>
+    </section>
+
+    <nav class="workspace-tabs" aria-label="情报工作区">
+      <button class="tab active" data-tab="daily">当日总结</button>
+      <button class="tab" data-tab="qa">知识库 AI 问答</button>
+    </nav>
+
+    <section id="tab-daily" class="panel workspace active">
       <div class="section-head">
         <div>
           <h2>当日总结</h2>
-          <p>从当天已入库的 Run、Source、Claim、Entity、Relation 等证据生成，不调用云端 AI。</p>
+          <p>汇总当天 Run、Source、Claim、Entity、Relation，并标注失败任务造成的信息缺口。</p>
         </div>
         <div class="inline-actions">
           <input id="summaryDate" type="date">
@@ -57,18 +131,16 @@
       <pre id="dailySummary" class="answer">选择日期后查看总结。</pre>
     </section>
 
-    <section class="panel">
+    <section id="tab-qa" class="panel workspace">
       <div class="section-head">
         <div>
           <h2>本地知识库 AI 问答</h2>
-          <p>继续使用 Qwen3.8 27B。系统先从本地 PostgreSQL 证据中检索，再让模型基于证据回答。</p>
+          <p>先检索本地 PostgreSQL 证据，再由 Qwen3.8 27B 综合回答；重要结论引用本地证据编号。</p>
         </div>
       </div>
       <div class="ask-box">
-        <textarea id="question" rows="5" placeholder="例如：三乐过去 30 天发生了什么变化？有哪些证据支持？下一步需要重点监控什么？"></textarea>
-        <div class="inline-actions align-right">
-          <button id="askButton" class="button">询问知识库</button>
-        </div>
+        <textarea id="question" rows="5" placeholder="例如：结合过去 30 天记录，三乐发生了哪些变化？哪些是事实、推断和预测？"></textarea>
+        <div class="inline-actions align-right"><button id="askButton" class="button">询问知识库</button></div>
       </div>
       <div id="askMeta" class="meta"></div>
       <pre id="answer" class="answer">回答会显示在这里。</pre>
@@ -80,6 +152,6 @@
   </main>
 
   <div id="toast" class="toast"></div>
-  <script src="/insights.js?v=4.8-intelligence-center"></script>
+  <script src="/insights.js?v=4.9-serial-queue"></script>
 </body>
 </html>

@@ -19,6 +19,7 @@ from sqlalchemy import inspect, text
 from . import models as db_models
 from .db import engine, session_scope
 from .tasks import ensure_run_enqueued
+from .queue_runtime import build_queue_view, reset_recovery_state
 
 logger = logging.getLogger("internetboard.intelligence")
 router = APIRouter(prefix="/api/intelligence", tags=["intelligence"])
@@ -149,11 +150,13 @@ def _classify_runs(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]
 
 
 @router.get("/tasks")
-def intelligence_tasks(limit: int = Query(default=100, ge=10, le=500)):
+def intelligence_tasks(limit: int = Query(default=200, ge=10, le=500)):
     rows = _run_rows(limit)
     grouped = _classify_runs(rows)
+    queue = build_queue_view(rows)
     return {
         "counts": {key: len(value) for key, value in grouped.items()},
+        "queue": queue,
         **grouped,
     }
 
@@ -193,6 +196,7 @@ def resume_failed_run(run_id: int):
                     setattr(run, field, value)
                 except Exception:
                     pass
+    reset_recovery_state(run_id)
     result = ensure_run_enqueued(run_id, reason="manual failed-run resume from intelligence center")
     if not result:
         raise HTTPException(status_code=503, detail=f"Run {run_id} reset but could not enter Celery queue")
