@@ -1,6 +1,9 @@
 FROM nginx:1.28-alpine
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY index.html /usr/share/nginx/html/index.html
+COPY classic.html /usr/share/nginx/html/classic.html
+COPY command-center.css /usr/share/nginx/html/command-center.css
+COPY command-center.js /usr/share/nginx/html/command-center.js
 COPY app.js /usr/share/nginx/html/app.js
 COPY styles.css /usr/share/nginx/html/styles.css
 

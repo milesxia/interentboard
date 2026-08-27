@@ -2,92 +2,152 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>InternetBoard</title>
-  <link rel="stylesheet" href="/styles.css">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>InternetBoard · 上海本地情报指挥舱</title>
+  <link rel="stylesheet" href="/command-center.css?v=4.13-dark-command-center">
 </head>
 <body>
-  <header class="topbar">
-    <div>
-      <div class="eyebrow">LOCAL RESEARCH AGENT</div>
-      <h1>InternetBoard</h1>
-    </div>
-    <div class="top-actions">
-      <span id="modelBadge" class="badge muted">模型检测中</span>
-      <button id="exportBtn" class="ghost">导出交接</button>
-      <button id="refreshBtn">刷新</button>
-    </div>
-  </header>
-  <main>
-    <section class="stats" id="stats"></section>
+  <!-- V4.13 DARK COMMAND CENTER -->
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="topbar-left">
+        <button class="icon-btn sidebar-toggle" id="sidebarToggle" aria-label="收起菜单">☰</button>
+        <a href="/" class="brand">InternetBoard</a>
+        <span class="system-pill"><i></i><span id="systemOverall">系统运行正常</span></span>
+      </div>
+      <div class="topbar-right">
+        <div class="global-search-wrap">
+          <input id="globalSearch" class="global-search" placeholder="搜索任务、证据、专题、来源…" autocomplete="off">
+          <span class="search-icon">⌕</span>
+        </div>
+        <a id="intelligenceCenterLink" class="run-board-pill" href="/insights.html#queue" title="AI 串行队列、ETA 与失败任务">运行看板</a>
+        <span class="clock" id="topClock">--:--:--</span>
+        <span class="build-pill" id="buildBadge">BUILD …</span>
+        <a class="user-pill" href="/classic.html" title="高级管理">A&nbsp;&nbsp;管理员⌄</a>
+      </div>
+    </header>
 
-    <section class="grid two">
-      <article class="panel">
-        <div class="panel-head"><h2>专题</h2><span>每日 03:00 自动研究，每行一个查询点</span></div>
-        <form id="topicForm" class="form">
-          <input name="topic_id" type="hidden">
-          <input name="name" placeholder="专题名称" required>
-          <textarea name="query" rows="5" placeholder="每行一个独立查询语句 / 研究问题" required></textarea>
-          <textarea name="description" rows="4" placeholder="研究背景、当前状态、判断边界和注意事项（可选）"></textarea>
-          <div class="actions">
-            <button id="topicSubmit" type="submit">新增专题</button>
-            <button id="topicCancel" type="button" class="ghost" hidden>取消编辑</button>
+    <aside class="sidebar" id="sidebar">
+      <nav class="nav-list">
+        <a class="nav-item active" href="#overview"><span class="nav-icon">▦</span><span>总览</span></a>
+        <a class="nav-item" href="#pipeline"><span class="nav-icon">⌁</span><span>本地采集</span></a>
+        <a class="nav-item" href="/insights.html#queue"><span class="nav-icon">✦</span><span>AI分析</span></a>
+        <a class="nav-item" href="/insights.html#queue"><span class="nav-icon">◫</span><span>任务监控</span></a>
+        <a class="nav-item" href="/insights.html#daily"><span class="nav-icon">▤</span><span>今日报告</span></a>
+        <a class="nav-item" href="/classic.html#graph"><span class="nav-icon">⌘</span><span>知识图谱</span></a>
+        <a class="nav-item" href="/insights.html#qa"><span class="nav-icon">?</span><span>知识库问答</span></a>
+        <a class="nav-item" href="/classic.html#sources"><span class="nav-icon">◇</span><span>来源白名单</span></a>
+        <a class="nav-item" href="#health"><span class="nav-icon">⚙</span><span>系统运行</span></a>
+      </nav>
+      <div class="sidebar-bottom">
+        <a class="nav-item handoff-entry" data-feature="handoff-export" href="/classic.html" title="导出交接 Markdown · 进入高级管理"><span class="nav-icon">⇩</span><span>导出交接</span></a>
+        <a class="nav-item subtle" href="/classic.html"><span class="nav-icon">↗</span><span>高级管理</span></a>
+        <button class="collapse-btn" id="collapseBtn">« <span>收起菜单</span></button>
+      </div>
+    </aside>
+
+    <main class="main-content" id="overview">
+      <section class="main-grid hero-grid">
+        <div class="card hero-card">
+          <div class="hero-head">
+            <div>
+              <div class="eyebrow">SHANGHAI LOCAL INTELLIGENCE</div>
+              <h1>今日情报态势</h1>
+              <div class="muted">实时更新：<span id="heroUpdated">--:--:--</span></div>
+            </div>
+            <div class="hero-orbit" aria-hidden="true">
+              <div class="orbit orbit-a"></div>
+              <div class="orbit orbit-b"></div>
+              <div class="globe-core">沪</div>
+            </div>
           </div>
-        </form>
-        <div id="topics" class="stack"></div>
-      </article>
-      <article class="panel">
-        <div class="panel-head"><h2>任务状态</h2><span>断点与失败状态保留</span></div>
-        <div id="runs" class="stack"></div>
-      </article>
-    </section>
-    <section class="grid two">
-      <article class="panel">
-        <div class="panel-head"><h2>人工输入</h2><span>优先级 100</span></div>
-        <form id="noteForm" class="form">
-          <select name="topic_id" id="noteTopic" required></select>
-          <input name="title" placeholder="标题（可选）">
-          <textarea name="content" rows="6" placeholder="输入已知信息、线索、人工结论或需要 AI 整理的内容" required></textarea>
-          <button type="submit">写入知识库输入</button>
-        </form>
-      </article>
-      <article class="panel">
-        <div class="panel-head"><h2>网页变化监测</h2><span>变化后自动触发研究</span></div>
-        <form id="watchForm" class="form">
-          <select name="topic_id" id="watchTopic" required></select>
-          <input name="url" type="url" placeholder="https://example.com/page" required>
-          <button type="submit">添加监测</button>
-        </form>
-        <div id="watches" class="stack small"></div>
-      </article>
-    </section>
-    <section class="panel">
-      <div class="panel-head"><h2>最新知识</h2><span>人工 &gt; AI事实 &gt; AI推测</span></div>
-      <div id="claims" class="claims"></div>
-    </section>
-    <section class="grid two">
-      <article class="panel">
-        <div class="panel-head"><h2>冲突</h2><span>发现冲突只记录，不静默覆盖</span></div>
-        <div id="conflicts" class="stack"></div>
-      </article>
-      <article class="panel">
-        <div class="panel-head"><h2>证据</h2><span>原始内容可追溯</span></div>
-        <div id="sources" class="stack"></div>
-      </article>
-    </section>
-    <section class="panel">
-      <div class="panel-head"><h2>知识图谱</h2><span>Entity / Relation</span></div>
-      <svg id="graph" viewBox="0 0 1000 520" role="img" aria-label="Knowledge graph"></svg>
-    </section>
-  </main>
+          <div class="metric-grid">
+            <article class="metric-card blue"><div class="metric-icon">▱</div><span>今日有效证据</span><strong id="metricEvidence">0</strong><small id="metricEvidenceSub">等待采集</small><div class="spark blue-spark"></div></article>
+            <article class="metric-card cyan"><div class="metric-icon">⌁</div><span>覆盖区级</span><strong id="metricDistricts">0/16</strong><small>上海16区本地来源</small><div class="spark cyan-spark"></div></article>
+            <article class="metric-card purple"><div class="metric-icon">◉</div><span>AI 队列</span><strong id="metricQueue">0</strong><small id="metricQueueSub">严格串行 1×</small><div class="spark purple-spark"></div></article>
+            <article class="metric-card orange"><div class="metric-icon">★</div><span>三乐专项证据</span><strong id="metricSanle">0</strong><small>静安·江宁路·三乐里</small><div class="spark orange-spark"></div></article>
+            <article class="metric-card green"><div class="metric-icon">▤</div><span>今日日报</span><strong id="metricReport">—</strong><small id="metricReportSub">等待当天任务完成</small><div class="progress-mini"><i id="reportProgress"></i></div></article>
+          </div>
+        </div>
+
+        <aside class="card region-card">
+          <div class="section-title-row"><h2>上海重点区域</h2><a href="/insights.html#local">详情 →</a></div>
+          <div class="region-tabs"><button class="active">上海市</button><span>16个区</span></div>
+          <div class="region-visual">
+            <svg class="shanghai-symbol" viewBox="0 0 240 210" aria-label="上海区域示意">
+              <defs><linearGradient id="sg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0d3169"/><stop offset="1" stop-color="#00b8ff"/></linearGradient></defs>
+              <path d="M29 36 L72 17 115 29 141 48 188 43 211 66 194 91 218 118 181 132 169 169 132 184 102 164 66 178 47 145 20 123 39 94 19 70 Z" fill="url(#sg)" opacity=".75" stroke="#2b65a9" stroke-width="2"/>
+              <circle cx="119" cy="107" r="10" fill="#00e6c0" opacity=".95"/><circle cx="119" cy="107" r="22" fill="#00e6c0" opacity=".12"/>
+              <text x="119" y="111" text-anchor="middle" font-size="9" fill="#03151c" font-weight="700">静安</text>
+            </svg>
+            <div class="district-grid" id="districtGrid"></div>
+          </div>
+          <div class="focus-zone">
+            <div class="focus-kicker">重点关注区域</div>
+            <h3>静安区 / 江宁路街道 / 三乐</h3>
+            <div class="focus-metrics">
+              <div><span>今日证据</span><strong id="focusEvidence">0</strong></div>
+              <div><span>覆盖区级</span><strong id="focusDistricts">0</strong></div>
+              <div><span>采集状态</span><strong id="focusCollector">等待</strong></div>
+            </div>
+          </div>
+        </aside>
+      </section>
+
+      <section id="pipeline" class="card pipeline-card">
+        <div class="section-title-row"><div><h2>处理流水线</h2><p>采集 → 文章内过滤 → 同事件合并 → 串行 AI → 日报生成</p></div><button class="ghost-btn" id="runCollectBtn">立即采集</button></div>
+        <div class="pipeline">
+          <div class="pipe-step blue"><div class="pipe-icon">⇩</div><div><b>采集</b><strong id="pipeCollected">0</strong><span id="pipeCollectedStatus">等待</span></div></div>
+          <div class="pipe-arrow">······→</div>
+          <div class="pipe-step cyan"><div class="pipe-icon">▽</div><div><b>相关过滤</b><strong id="pipeFiltered">0</strong><span>文章内去除无关内容</span></div></div>
+          <div class="pipe-arrow">······→</div>
+          <div class="pipe-step purple"><div class="pipe-icon">◌</div><div><b>事件聚合</b><strong id="pipeEvents">—</strong><span>同事件来源合并</span></div></div>
+          <div class="pipe-arrow">······→</div>
+          <div class="pipe-step blue"><div class="pipe-icon">✦</div><div><b>AI分析</b><strong id="pipeAI">0</strong><span id="pipeAIStatus">串行 1×</span></div></div>
+          <div class="pipe-arrow">······→</div>
+          <div class="pipe-step green"><div class="pipe-icon">✓</div><div><b>日报生成</b><strong id="pipeReport">—</strong><span id="pipeReportStatus">等待</span></div></div>
+        </div>
+      </section>
+
+      <section class="main-grid work-grid">
+        <div class="card tasks-card">
+          <div class="section-title-row"><div><h2>任务监控</h2><div class="legend"><span class="dot blue-dot"></span>运行中 <b id="countRunning">0</b><span class="dot green-dot"></span>完成 <b id="countDone">0</b><span class="dot red-dot"></span>失败 <b id="countFailed">0</b><span class="dot orange-dot"></span>排队 <b id="countQueued">0</b></div></div><a href="/insights.html#queue">查看全部 →</a></div>
+          <div class="table-scroll"><table class="task-table"><thead><tr><th>任务名称</th><th>状态</th><th>进度</th><th>ETA</th><th>更新时间</th><th></th></tr></thead><tbody id="taskRows"><tr><td colspan="6" class="empty">正在读取任务…</td></tr></tbody></table></div>
+          <div class="warning-bar hidden" id="taskWarning"></div>
+        </div>
+
+        <div class="card events-card">
+          <div class="section-title-row"><h2>今日证据 / 事件聚合</h2><a href="/classic.html#sources">查看全部 →</a></div>
+          <ol class="event-list" id="eventList"><li class="empty">正在读取证据…</li></ol>
+        </div>
+      </section>
+
+      <section class="main-grid bottom-grid" id="health">
+        <div class="card health-card">
+          <div class="section-title-row"><h2>系统资源负载</h2><a href="/classic.html#system">详情 →</a></div>
+          <div class="resource-grid">
+            <div class="resource-gauge"><div class="ring" id="gpuRing"><span id="gpuValue">—</span></div><div><b>GPU</b><small id="gpuMeta">GTX 1650 · Qwen3.8 27B</small></div></div>
+            <div class="resource-gauge"><div class="ring" id="cpuRing"><span id="cpuValue">—</span></div><div><b>CPU</b><small id="cpuMeta">Ryzen V1500B</small></div></div>
+            <div class="resource-bars"><label>内存 <strong id="ramValue">—</strong></label><div class="bar"><i id="ramBar"></i></div><label>Ollama <strong id="ollamaValue">检测中</strong></label><div class="bar"><i id="ollamaBar"></i></div></div>
+          </div>
+        </div>
+
+        <div class="card freshness-card">
+          <div class="section-title-row"><h2>数据来源新鲜度</h2><a href="/classic.html#sources">详情 →</a></div>
+          <div id="freshnessList" class="freshness-list"><div class="empty">正在读取来源…</div></div>
+        </div>
+      </section>
+
+      <footer class="footer-note">
+        <span>InternetBoard · Dark Command Center</span>
+        <span>本地部署 · 数据留在 NAS · 上海本地情报优先</span>
+      </footer>
+    </main>
+  </div>
 
   <div id="toast" class="toast"></div>
-  <script src="/app.js?v=4.7-refresh-chain"></script>
-  <script src="/build.js?v=4.7-refresh-chain"></script>
-
-  <!-- BEGIN INTERNETBOARD V4.10 OPERATIONS LINK -->
-  <a id="intelligenceCenterLink" href="/insights.html" title="上海本地采集、16区/街镇覆盖、AI串行队列、自动日报" style="position:fixed;right:20px;bottom:20px;z-index:9999;padding:10px 14px;border-radius:999px;background:#2563eb;color:#fff;text-decoration:none;font:600 14px system-ui;box-shadow:0 10px 30px rgba(0,0,0,.3)">运行看板</a>
-  <script src="/task-overlay.js?v=4.12-relevant-evidence-pipeline"></script>
-  <!-- END INTERNETBOARD V4.10 OPERATIONS LINK -->
+  <script src="/task-overlay.js?v=4.13-dark-command-center"></script>
+  <script src="/command-center.js?v=4.13-dark-command-center"></script>
 </body>
 </html>

@@ -43,7 +43,15 @@ must("INTERNETBOARD_API_KEY" not in runtime_text, "API-key UI/runtime dependency
 must("X-API-Key" not in runtime_text, "API-key header must be removed")
 must("bootstrap_defaults_once" in main, "One-time bootstrap is not wired into startup")
 must("/api/export/handoff" in main, "Handoff export endpoint is missing")
-must("exportBtn" in index and "exportBtn" in frontend, "Handoff export UI is missing")
+# INTERNETBOARD V4.13.2 HANDOFF MIGRATION
+# Legacy management functions moved from / to /classic.html in V4.13.
+# Validate the handoff control across both UI surfaces without loading legacy app.js on the dark home.
+_handoff_surface_v4132 = (
+    open("frontend/index.html", encoding="utf-8").read()
+    + "\n"
+    + open("frontend/classic.html", encoding="utf-8").read()
+)
+must("exportBtn" in _handoff_surface_v4132 and "exportBtn" in frontend, "Handoff export UI is missing")
 must("COPY config /app/config" in dockerfile, "Backend image does not contain config defaults")
 must("COPY seed /app/seed" in dockerfile, "Backend image does not contain seed assets")
 must("context: ." in workflow and "file: ./backend/Dockerfile" in workflow, "Backend CI build context is not repository root")

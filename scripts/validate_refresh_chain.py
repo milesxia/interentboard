@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 from pathlib import Path
-import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 errors = []
-
 
 def require_text(rel: str, *needles: str) -> str:
     p = ROOT / rel
@@ -18,7 +16,8 @@ def require_text(rel: str, *needles: str) -> str:
             errors.append(f"{rel}: missing {needle!r}")
     return text
 
-
+# The original V4.7 manual topic refresh UI is intentionally preserved in
+# /classic.html after V4.13 moved the primary UI to the dark command center.
 appjs = require_text("frontend/app.js", "runTopic", "/api/topics/${id}/run")
 post_forms = (
     "method:'POST'",
@@ -33,7 +32,7 @@ require_text(
     "backend/app/main.py",
     "/api/topics/{topic_id}/run",
     'enqueue_run(run_id, reason="manual refresh")',
-    '/api/build',
+    "/api/build",
     "manual-refresh request received",
 )
 require_text(
@@ -49,16 +48,36 @@ require_text(
     "INTERNETBOARD V4.7 NO-CACHE",
     "no-store, no-cache",
 )
+
+# V4.13 migration contract:
+# - primary / is the dark command center and must use command-center.js
+# - legacy topic-management/manual-refresh entry remains in /classic.html
+# - task-overlay stays on the dark command center for live queue status
 require_text(
     "frontend/index.html",
+    "V4.13 DARK COMMAND CENTER",
+    "/command-center.js?v=4.13-dark-command-center",
+    "/task-overlay.js",
+    "运行看板",
+)
+require_text(
+    "frontend/classic.html",
     "app.js?v=4.7-refresh-chain",
     '<script src="/build.js?v=4.7-refresh-chain"></script>',
+)
+require_text(
+    "frontend/command-center.js",
+    "/api/intelligence/local/collect",
+    "method:'POST'",
+    "cache:'no-store'",
 )
 require_text(
     "frontend/Dockerfile",
     "INTERNETBOARD V4.7 FRONTEND BUILD FILES",
     "COPY build.js /usr/share/nginx/html/build.js",
     "COPY build.json /usr/share/nginx/html/build.json",
+    "COPY classic.html /usr/share/nginx/html/classic.html",
+    "COPY command-center.js /usr/share/nginx/html/command-center.js",
 )
 require_text("backend/Dockerfile", "INTERNETBOARD_BUILD_SHA", "BUILD_SHA")
 
@@ -79,4 +98,4 @@ if errors:
     sys.exit(1)
 
 print("REFRESH CHAIN VALIDATION PASSED")
-print("frontend POST -> backend run route -> enqueue_run -> apply_async -> run_research contract present")
+print("dark command center + classic manual topic refresh -> backend run route -> enqueue_run -> apply_async -> run_research contract present")

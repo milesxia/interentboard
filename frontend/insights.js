@@ -68,3 +68,17 @@ async function runLocalCollect(){
 $('runLocalCollect')?.addEventListener('click',runLocalCollect);
 loadLocalCoverage();
 setInterval(loadLocalCoverage,60000);
+
+// V4.13 dark command-center deep-link support.
+(function(){
+  function activateFromHash(){
+    const h=(location.hash||'').replace('#','');
+    if(h==='qa'||h==='daily'){
+      const btn=document.querySelector(`.tab[data-tab="${h}"]`); if(btn) btn.click();
+      document.getElementById(`tab-${h}`)?.scrollIntoView({block:'start'});
+    }else if(h==='queue'||h==='local'){
+      document.getElementById(h)?.scrollIntoView({block:'start'});
+    }
+  }
+  setTimeout(activateFromHash,120);window.addEventListener('hashchange',activateFromHash);
+})();

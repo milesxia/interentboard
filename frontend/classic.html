@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>InternetBoard</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <div class="eyebrow">LOCAL RESEARCH AGENT</div>
+      <h1>InternetBoard</h1>
+    </div>
+    <div class="top-actions">
+      <span id="modelBadge" class="badge muted">模型检测中</span>
+      <button id="exportBtn" class="ghost">导出交接</button>
+      <button id="refreshBtn">刷新</button>
+    </div>
+  </header>
+  <main>
+    <section class="stats" id="stats"></section>
+
+    <section class="grid two">
+      <article class="panel">
+        <div class="panel-head"><h2>专题</h2><span>每日 03:00 自动研究，每行一个查询点</span></div>
+        <form id="topicForm" class="form">
+          <input name="topic_id" type="hidden">
+          <input name="name" placeholder="专题名称" required>
+          <textarea name="query" rows="5" placeholder="每行一个独立查询语句 / 研究问题" required></textarea>
+          <textarea name="description" rows="4" placeholder="研究背景、当前状态、判断边界和注意事项（可选）"></textarea>
+          <div class="actions">
+            <button id="topicSubmit" type="submit">新增专题</button>
+            <button id="topicCancel" type="button" class="ghost" hidden>取消编辑</button>
+          </div>
+        </form>
+        <div id="topics" class="stack"></div>
+      </article>
+      <article class="panel">
+        <div class="panel-head"><h2>任务状态</h2><span>断点与失败状态保留</span></div>
+        <div id="runs" class="stack"></div>
+      </article>
+    </section>
+    <section class="grid two">
+      <article class="panel">
+        <div class="panel-head"><h2>人工输入</h2><span>优先级 100</span></div>
+        <form id="noteForm" class="form">
+          <select name="topic_id" id="noteTopic" required></select>
+          <input name="title" placeholder="标题（可选）">
+          <textarea name="content" rows="6" placeholder="输入已知信息、线索、人工结论或需要 AI 整理的内容" required></textarea>
+          <button type="submit">写入知识库输入</button>
+        </form>
+      </article>
+      <article class="panel">
+        <div class="panel-head"><h2>网页变化监测</h2><span>变化后自动触发研究</span></div>
+        <form id="watchForm" class="form">
+          <select name="topic_id" id="watchTopic" required></select>
+          <input name="url" type="url" placeholder="https://example.com/page" required>
+          <button type="submit">添加监测</button>
+        </form>
+        <div id="watches" class="stack small"></div>
+      </article>
+    </section>
+    <section class="panel">
+      <div class="panel-head"><h2>最新知识</h2><span>人工 &gt; AI事实 &gt; AI推测</span></div>
+      <div id="claims" class="claims"></div>
+    </section>
+    <section class="grid two">
+      <article class="panel">
+        <div class="panel-head"><h2>冲突</h2><span>发现冲突只记录，不静默覆盖</span></div>
+        <div id="conflicts" class="stack"></div>
+      </article>
+      <article class="panel">
+        <div class="panel-head"><h2>证据</h2><span>原始内容可追溯</span></div>
+        <div id="sources" class="stack"></div>
+      </article>
+    </section>
+    <section class="panel">
+      <div class="panel-head"><h2>知识图谱</h2><span>Entity / Relation</span></div>
+      <svg id="graph" viewBox="0 0 1000 520" role="img" aria-label="Knowledge graph"></svg>
+    </section>
+  </main>
+
+  <div id="toast" class="toast"></div>
+  <script src="/app.js?v=4.7-refresh-chain"></script>
+  <script src="/build.js?v=4.7-refresh-chain"></script>
+
+  <!-- BEGIN INTERNETBOARD V4.10 OPERATIONS LINK -->
+  <a id="intelligenceCenterLink" href="/insights.html" title="上海本地采集、16区/街镇覆盖、AI串行队列、自动日报" style="position:fixed;right:20px;bottom:20px;z-index:9999;padding:10px 14px;border-radius:999px;background:#2563eb;color:#fff;text-decoration:none;font:600 14px system-ui;box-shadow:0 10px 30px rgba(0,0,0,.3)">运行看板</a>
+  <script src="/task-overlay.js?v=4.12-relevant-evidence-pipeline"></script>
+  <!-- END INTERNETBOARD V4.10 OPERATIONS LINK -->
+
+<!-- V4.13 classic management return -->
+<a href="/" style="position:fixed;right:18px;bottom:18px;z-index:9999;background:#0b1724;color:#63d4ff;border:1px solid #1c5a83;border-radius:8px;padding:10px 14px;text-decoration:none;font:13px system-ui;box-shadow:0 10px 30px #0007">← 返回黑色指挥舱</a>
+</body>
+</html>
