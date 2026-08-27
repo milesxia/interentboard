@@ -67,7 +67,9 @@ x-app-env: &app-env
   AI_SUMMARY_DEFAULT_SECONDS: "1200"
 
 
-  # BEGIN INTERNETBOARD V4.11 SHANGHAI LOCAL ENV
+
+
+  # BEGIN INTERNETBOARD V4.12 RELEVANT EVIDENCE ENV
   LOCAL_INTEL_TIME_RANGE: "day"
   LOCAL_INTEL_RESULTS_PER_QUERY: "3"
   LOCAL_INTEL_MAX_TOPICS: "12"
@@ -76,8 +78,12 @@ x-app-env: &app-env
   LOCAL_INTEL_QUERY_DELAY_SECONDS: "0.35"
   LOCAL_INTEL_MIN_SCORE: "60"
   LOCAL_INTEL_MAX_CONTENT_CHARS: "12000"
-  DAILY_REPORT_NOT_BEFORE_MINUTE: "15"
-  # END INTERNETBOARD V4.11 SHANGHAI LOCAL ENV
+  LOCAL_INTEL_RELEVANT_MAX_CHARS: "6500"
+  LOCAL_INTEL_CONTEXT_PARAGRAPHS: "1"
+  LOCAL_INTEL_EVENT_SIMILARITY: "0.72"
+  LOCAL_INTEL_EVENT_MAX_SOURCES: "2"
+  LOCAL_INTEL_MAX_EVENTS_FOR_AI: "60"
+  # END INTERNETBOARD V4.12 RELEVANT EVIDENCE ENV
 
 services:
   postgres:
@@ -265,6 +271,11 @@ services:
 
   # =========================================================
   # Shanghai Local Collector - V4.11
+  # 市级/16区/街镇社区 Web 采集与 CPU 预过滤；不执行 Qwen 重推理。
+  # 三乐专题额外定向 静安区 -> 江宁路街道 -> 三乐里 / In江宁。
+  # =========================================================
+  # =========================================================
+  # Shanghai Local Collector - V4.12
   # 市级/16区/街镇社区 Web 采集与 CPU 预过滤；不执行 Qwen 重推理。
   # 三乐专题额外定向 静安区 -> 江宁路街道 -> 三乐里 / In江宁。
   # =========================================================

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import difflib
 import html as html_lib
 import json
 import logging
@@ -46,9 +47,13 @@ LOCAL_INTEL_MAX_TOPICS = max(1, min(30, int(os.getenv("LOCAL_INTEL_MAX_TOPICS", 
 LOCAL_INTEL_FETCH_TIMEOUT_SECONDS = max(5, min(60, int(os.getenv("LOCAL_INTEL_FETCH_TIMEOUT_SECONDS", "20"))))
 LOCAL_INTEL_MIN_SCORE = max(30, min(100, int(os.getenv("LOCAL_INTEL_MIN_SCORE", "60"))))
 LOCAL_INTEL_MAX_CONTENT_CHARS = max(2000, min(30000, int(os.getenv("LOCAL_INTEL_MAX_CONTENT_CHARS", "12000"))))
+LOCAL_INTEL_RELEVANT_MAX_CHARS = max(1200, min(12000, int(os.getenv("LOCAL_INTEL_RELEVANT_MAX_CHARS", "6500"))))
+LOCAL_INTEL_CONTEXT_PARAGRAPHS = max(0, min(2, int(os.getenv("LOCAL_INTEL_CONTEXT_PARAGRAPHS", "1"))))
+LOCAL_INTEL_EVENT_SIMILARITY = max(0.55, min(0.95, float(os.getenv("LOCAL_INTEL_EVENT_SIMILARITY", "0.72"))))
+LOCAL_INTEL_EVENT_MAX_SOURCES = max(1, min(4, int(os.getenv("LOCAL_INTEL_EVENT_MAX_SOURCES", "2"))))
+LOCAL_INTEL_MAX_EVENTS_FOR_AI = max(10, min(120, int(os.getenv("LOCAL_INTEL_MAX_EVENTS_FOR_AI", "60"))))
 LOCAL_INTEL_MAX_QUERIES_PER_TOPIC = max(16, min(60, int(os.getenv("LOCAL_INTEL_MAX_QUERIES_PER_TOPIC", "40"))))
 LOCAL_INTEL_QUERY_DELAY_SECONDS = max(0.0, min(3.0, float(os.getenv("LOCAL_INTEL_QUERY_DELAY_SECONDS", "0.35"))))
-DAILY_REPORT_NOT_BEFORE_MINUTE = max(0, min(59, int(os.getenv("DAILY_REPORT_NOT_BEFORE_MINUTE", "15"))))
 
 DISTRICTS = (
     "浦东新区", "黄浦区", "静安区", "徐汇区", "长宁区", "普陀区", "虹口区", "杨浦区",
@@ -117,18 +122,32 @@ class TopicSpec:
 
 
 class _HTMLText(HTMLParser):
+    BLOCK_TAGS = {"p", "div", "article", "section", "li", "tr", "h1", "h2", "h3", "h4", "h5", "br"}
+
     def __init__(self) -> None:
         super().__init__()
         self.parts: list[str] = []
         self._skip = 0
 
+    def _break(self) -> None:
+        if self.parts and self.parts[-1] != "\n":
+            self.parts.append("\n")
+
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag.lower() in {"script", "style", "noscript", "svg"}:
+        tag = tag.lower()
+        if tag in {"script", "style", "noscript", "svg"}:
             self._skip += 1
+            return
+        if not self._skip and tag in self.BLOCK_TAGS:
+            self._break()
 
     def handle_endtag(self, tag: str) -> None:
-        if tag.lower() in {"script", "style", "noscript", "svg"} and self._skip:
+        tag = tag.lower()
+        if tag in {"script", "style", "noscript", "svg"} and self._skip:
             self._skip -= 1
+            return
+        if not self._skip and tag in self.BLOCK_TAGS:
+            self._break()
 
     def handle_data(self, data: str) -> None:
         if not self._skip:
@@ -167,6 +186,8 @@ def ensure_local_tables() -> None:
         url TEXT NOT NULL,
         snippet TEXT NULL,
         content TEXT NULL,
+        raw_content TEXT NULL,
+        event_key TEXT NULL,
         relevance_score INTEGER NOT NULL,
         query_text TEXT NULL,
         content_hash TEXT NOT NULL UNIQUE,
@@ -177,7 +198,10 @@ def ensure_local_tables() -> None:
         conn.execute(text(ddl))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_local_source_evidence_date ON local_source_evidence(evidence_date DESC)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_local_source_evidence_topic ON local_source_evidence(topic_name, evidence_date DESC)"))
+        conn.execute(text("ALTER TABLE local_source_evidence ADD COLUMN IF NOT EXISTS raw_content TEXT NULL"))
+        conn.execute(text("ALTER TABLE local_source_evidence ADD COLUMN IF NOT EXISTS event_key TEXT NULL"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_local_source_evidence_region ON local_source_evidence(district, street, evidence_date DESC)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_local_source_evidence_event ON local_source_evidence(evidence_date, topic_name, event_key)"))
 
 
 def _normalize_terms(value: Any) -> list[str]:
@@ -479,7 +503,7 @@ def _fetch_text(url: str) -> str:
     req = urllib.request.Request(
         url,
         headers={
-            "User-Agent": "Mozilla/5.0 InternetBoard/4.11",
+            "User-Agent": "Mozilla/5.0 InternetBoard/4.12",
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.5",
         },
     )
@@ -496,8 +520,212 @@ def _fetch_text(url: str) -> str:
         parser.feed(raw)
     except Exception:
         return ""
-    text_value = re.sub(r"\s+", " ", " ".join(parser.parts)).strip()
-    return text_value[:LOCAL_INTEL_MAX_CONTENT_CHARS]
+    joined = " ".join(parser.parts)
+    joined = re.sub(r"[ \t\r\f\v]+", " ", joined)
+    joined = re.sub(r" *\n *", "\n", joined)
+    joined = re.sub(r"\n{3,}", "\n\n", joined).strip()
+    return joined[:LOCAL_INTEL_MAX_CONTENT_CHARS]
+
+
+_BOILERPLATE_PATTERNS = (
+    "责任编辑", "免责声明", "版权声明", "相关阅读", "相关推荐", "猜你喜欢", "返回首页",
+    "点击查看", "扫码关注", "关注我们", "更多精彩", "分享至", "打开微信", "阅读原文",
+    "网站地图", "联系我们", "主办单位", "技术支持", "ICP备案", "无障碍", "适老版",
+)
+_POLICY_SIGNALS = (
+    "政策", "通知", "公告", "公示", "意见", "方案", "办法", "细则", "规划", "实施",
+    "申报", "补贴", "资金", "项目", "征求意见", "正式发布", "施行", "适用", "对象",
+    "期限", "标准", "要求", "责任", "推进", "改造", "建设", "签约", "开工", "竣工",
+)
+_FACT_SIGNALS = (
+    "万元", "亿元", "平方米", "日期", "截至", "自即日起", "202", "年", "月", "日",
+    "企业", "居民", "社区", "街道", "园区", "部门", "单位", "范围", "名单",
+)
+
+
+def _split_relevant_units(content: str) -> list[str]:
+    if not content:
+        return []
+    raw_parts = [re.sub(r"\s+", " ", x).strip() for x in re.split(r"\n+", content)]
+    parts: list[str] = []
+    for raw in raw_parts:
+        if not raw:
+            continue
+        if len(raw) > 900:
+            chunks = [x.strip() for x in re.split(r"(?<=[。！？；])", raw) if x.strip()]
+        else:
+            chunks = [raw]
+        for chunk in chunks:
+            chunk = re.sub(r"\s+", " ", chunk).strip()
+            if len(chunk) < 12:
+                continue
+            if any(token in chunk for token in _BOILERPLATE_PATTERNS) and len(chunk) < 180:
+                continue
+            parts.append(chunk)
+    return parts[:600]
+
+
+def _topic_terms(spec: TopicSpec) -> tuple[str, ...]:
+    terms: list[str] = []
+    for term in spec.terms:
+        term = re.sub(r"\s+", " ", str(term)).strip()
+        if len(term) >= 2 and term not in {"上海", "上海市", "政策", "新闻", "动态"} and term not in terms:
+            terms.append(term)
+    if spec.sanle:
+        for term in SANLE_TERMS:
+            if term not in terms:
+                terms.append(term)
+    return tuple(terms[:16])
+
+
+def _unit_relevance_score(unit: str, spec: TopicSpec, district: str | None, street: str | None, title_relevant: bool) -> int:
+    lower = unit.lower()
+    score = 0
+    topic_hits = sum(1 for term in _topic_terms(spec) if term.lower() in lower)
+    score += min(36, topic_hits * 14)
+    if district and district in unit:
+        score += 9
+    if street and street in unit:
+        score += 14
+    if "上海" in unit:
+        score += 5
+    if spec.sanle:
+        if any(term in unit for term in ("三乐", "三乐里", "三乐小区", "三乐里居民区")):
+            score += 24
+        if "江宁路街道" in unit:
+            score += 18
+    policy_hits = sum(1 for token in _POLICY_SIGNALS if token in unit)
+    fact_hits = sum(1 for token in _FACT_SIGNALS if token in unit)
+    if topic_hits or (district and district in unit) or (street and street in unit) or spec.sanle and "三乐" in unit:
+        score += min(10, policy_hits * 2)
+        score += min(6, fact_hits)
+    elif title_relevant and policy_hits:
+        score += 8 + min(8, policy_hits * 2) + min(4, fact_hits)
+    return score
+
+
+def _filter_relevant_content(
+    content: str,
+    spec: TopicSpec,
+    title: str,
+    snippet: str,
+    district: str | None,
+    street: str | None,
+) -> tuple[str, dict[str, Any]]:
+    units = _split_relevant_units(content)
+    if not units:
+        return "", {"raw_chars": len(content or ""), "kept_chars": 0, "units": 0, "kept_units": 0}
+
+    title_blob = f"{title} {snippet}".lower()
+    title_relevant = any(term.lower() in title_blob for term in _topic_terms(spec))
+    if spec.sanle and any(term.lower() in title_blob for term in SANLE_TERMS):
+        title_relevant = True
+
+    scores = [_unit_relevance_score(unit, spec, district, street, title_relevant) for unit in units]
+    selected = {i for i, score in enumerate(scores) if score >= 12}
+
+    # When the title itself is strongly on-topic, retain policy/fact-bearing units even if the
+    # topic name is not repeated in every paragraph (common in government notices).
+    if title_relevant:
+        for i, unit in enumerate(units):
+            if scores[i] >= 8 or any(token in unit for token in _POLICY_SIGNALS) and any(token in unit for token in _FACT_SIGNALS):
+                selected.add(i)
+
+    expanded: set[int] = set(selected)
+    for i in list(selected):
+        for offset in range(1, LOCAL_INTEL_CONTEXT_PARAGRAPHS + 1):
+            if i - offset >= 0:
+                expanded.add(i - offset)
+            if i + offset < len(units):
+                expanded.add(i + offset)
+
+    # If the article-level score already accepted the page but paragraph matching is sparse,
+    # keep a small evidence window instead of reverting to the full article.
+    if not expanded and title_relevant:
+        expanded.update(range(min(3, len(units))))
+
+    kept: list[str] = []
+    kept_idx: list[int] = []
+    total_chars = 0
+    for i in sorted(expanded):
+        unit = units[i]
+        if total_chars + len(unit) > LOCAL_INTEL_RELEVANT_MAX_CHARS:
+            remain = LOCAL_INTEL_RELEVANT_MAX_CHARS - total_chars
+            if remain >= 120:
+                kept.append(unit[:remain])
+                kept_idx.append(i)
+            break
+        kept.append(unit)
+        kept_idx.append(i)
+        total_chars += len(unit) + 2
+
+    filtered = "\n\n".join(kept).strip()
+    meta = {
+        "raw_chars": len(content or ""),
+        "kept_chars": len(filtered),
+        "units": len(units),
+        "kept_units": len(kept),
+        "kept_indexes": kept_idx[:80],
+        "compression_ratio": round(len(filtered) / max(1, len(content or "")), 4),
+    }
+    return filtered, meta
+
+
+def _event_title_norm(value: str) -> str:
+    value = html_lib.unescape(value or "").lower()
+    value = re.sub(r"[【】\[\]（）()《》<>｜|_—–\-:：,，。！？!?;；'\"“”‘’·]", "", value)
+    for token in ("上海", "最新", "重磅", "发布", "官方", "通知", "公告", "公示"):
+        value = value.replace(token, "")
+    return re.sub(r"\s+", "", value)[:180]
+
+
+def _event_similarity(a: str, b: str) -> float:
+    a_n, b_n = _event_title_norm(a), _event_title_norm(b)
+    if not a_n or not b_n:
+        return 0.0
+    if a_n in b_n or b_n in a_n:
+        return min(len(a_n), len(b_n)) / max(len(a_n), len(b_n))
+    return difflib.SequenceMatcher(None, a_n, b_n).ratio()
+
+
+def _source_priority(row: dict[str, Any]) -> int:
+    level = str(row.get("source_level") or "")
+    if level in {"street_official", "district_official", "municipal_official"}:
+        return 100
+    if level in {"street_official_wechat", "official_wechat_search"}:
+        return 90
+    if level == "local_media":
+        return 65
+    return 40
+
+
+def _cluster_local_events(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    clusters: list[dict[str, Any]] = []
+    for row in rows:
+        topic = str(row.get("topic_name") or "")
+        found = None
+        for cluster in clusters:
+            primary = cluster["primary"]
+            if str(primary.get("topic_name") or "") != topic:
+                continue
+            if _event_similarity(str(primary.get("title") or ""), str(row.get("title") or "")) >= LOCAL_INTEL_EVENT_SIMILARITY:
+                found = cluster
+                break
+        if found is None:
+            clusters.append({"primary": row, "supplements": []})
+            continue
+
+        primary = found["primary"]
+        new_rank = (_source_priority(row), int(row.get("relevance_score") or 0))
+        old_rank = (_source_priority(primary), int(primary.get("relevance_score") or 0))
+        if new_rank > old_rank:
+            found["supplements"].insert(0, primary)
+            found["primary"] = row
+        else:
+            found["supplements"].append(row)
+        found["supplements"] = found["supplements"][:LOCAL_INTEL_EVENT_MAX_SOURCES]
+    clusters.sort(key=lambda c: (_source_priority(c["primary"]), int(c["primary"].get("relevance_score") or 0)), reverse=True)
+    return clusters[:LOCAL_INTEL_MAX_EVENTS_FOR_AI]
 
 
 def _score_with_content(base: int, content: str, spec: TopicSpec, district: str | None, street: str | None) -> int:
@@ -539,11 +767,11 @@ def _insert_evidence(target: date, spec: TopicSpec, item: dict[str, Any]) -> boo
     sql = text("""
     INSERT INTO local_source_evidence (
         collected_at, published_at, evidence_date, topic_id, topic_name, source_name, source_level,
-        region, district, street, title, url, snippet, content, relevance_score, query_text,
+        region, district, street, title, url, snippet, content, raw_content, event_key, relevance_score, query_text,
         content_hash, metadata_json
     ) VALUES (
         :collected_at, :published_at, :evidence_date, :topic_id, :topic_name, :source_name, :source_level,
-        '上海市', :district, :street, :title, :url, :snippet, :content, :score, :query_text,
+        '上海市', :district, :street, :title, :url, :snippet, :content, :raw_content, :event_key, :score, :query_text,
         :content_hash, :metadata_json
     ) ON CONFLICT (content_hash) DO NOTHING
     RETURNING id
@@ -561,7 +789,9 @@ def _insert_evidence(target: date, spec: TopicSpec, item: dict[str, Any]) -> boo
         "title": item["title"][:1000],
         "url": item["url"][:3000],
         "snippet": (item.get("snippet") or "")[:5000],
-        "content": (item.get("content") or "")[:LOCAL_INTEL_MAX_CONTENT_CHARS],
+        "content": (item.get("content") or "")[:LOCAL_INTEL_RELEVANT_MAX_CHARS],
+        "raw_content": (item.get("raw_content") or "")[:LOCAL_INTEL_MAX_CONTENT_CHARS],
+        "event_key": (item.get("event_key") or "")[:220] or None,
         "score": int(item["score"]),
         "query_text": (item.get("query") or "")[:2000],
         "content_hash": item["content_hash"],
@@ -592,6 +822,8 @@ def collect_local_evidence(day: str | None = None) -> dict[str, Any]:
         "accepted": 0,
         "inserted": 0,
         "duplicates": 0,
+        "raw_chars": 0,
+        "relevant_chars": 0,
         "errors": [],
         "districts": {},
         "sanle_special": {"enabled": any(t.sanle for t in topics), "accepted": 0},
@@ -619,14 +851,19 @@ def collect_local_evidence(day: str | None = None) -> dict[str, Any]:
                 score, source_level, district, street, host = _base_score(url, title, snippet, spec, meta)
                 if score < max(40, LOCAL_INTEL_MIN_SCORE - 12):
                     continue
-                content = _fetch_text(url)
-                score = _score_with_content(score, content, spec, district, street)
+                raw_content = _fetch_text(url)
+                score = _score_with_content(score, raw_content, spec, district, street)
                 if score < LOCAL_INTEL_MIN_SCORE:
                     continue
+                content, relevance_meta = _filter_relevant_content(raw_content, spec, title, snippet, district, street)
+                if raw_content and not content:
+                    continue
                 report["accepted"] += 1
+                report["raw_chars"] += len(raw_content or "")
+                report["relevant_chars"] += len(content or "")
                 if district:
                     report["districts"][district] = int(report["districts"].get(district, 0)) + 1
-                if spec.sanle and (street == "江宁路街道" or any(x in (title + snippet + content) for x in ("三乐", "三乐里"))):
+                if spec.sanle and (street == "江宁路街道" or any(x in (title + snippet + raw_content) for x in ("三乐", "三乐里"))):
                     report["sanle_special"]["accepted"] += 1
                 evidence = {
                     "published_at": _parse_published(result.get("publishedDate") or result.get("published_at")),
@@ -638,6 +875,8 @@ def collect_local_evidence(day: str | None = None) -> dict[str, Any]:
                     "url": url,
                     "snippet": snippet,
                     "content": content,
+                    "raw_content": raw_content,
+                    "event_key": _event_title_norm(title),
                     "score": score,
                     "query": query,
                     "content_hash": _hash_row(url, title, content, snippet),
@@ -645,7 +884,8 @@ def collect_local_evidence(day: str | None = None) -> dict[str, Any]:
                         "engine": result.get("engine"),
                         "engines": result.get("engines"),
                         "category": result.get("category"),
-                        "collector": "v4.11-shanghai-local",
+                        "collector": "v4.12-relevant-evidence",
+                        "relevance_filter": relevance_meta,
                     },
                 }
                 try:
@@ -656,6 +896,9 @@ def collect_local_evidence(day: str | None = None) -> dict[str, Any]:
                 except Exception as exc:
                     report["errors"].append(f"insert {url[:80]}: {exc}")
 
+    report["evidence_compression_ratio"] = round(
+        report["relevant_chars"] / max(1, report["raw_chars"]), 4
+    )
     try:
         r = _redis()
         r.set(f"ib:v411:collector:done:{target.isoformat()}", _safe_json(report), ex=7 * 86400)
@@ -690,12 +933,14 @@ def local_coverage(day: str | None = None) -> dict[str, Any]:
         "sanle_jiangning_count": sanle,
         "collector": marker,
         "policy": {
-            "mode": "shanghai-local-first",
+            "mode": "shanghai-local-relevant-evidence",
             "municipal": True,
             "districts": list(DISTRICTS),
             "national_general_media_primary": False,
             "automatic_generic_national_research": False,
             "sanle_special": ["静安区", "江宁路街道", "三乐里居民区", "三乐小区", "In江宁"],
+            "article_internal_filter": True,
+            "same_event_merge_before_ai": True,
         },
     }
 
@@ -704,7 +949,7 @@ def _local_rows(target: date, limit: int = 180) -> list[dict[str, Any]]:
     ensure_local_tables()
     sql = text("""
         SELECT id, collected_at, published_at, topic_id, topic_name, source_name, source_level,
-               region, district, street, title, url, snippet, content, relevance_score
+               region, district, street, title, url, snippet, content, event_key, relevance_score
         FROM local_source_evidence
         WHERE evidence_date=:d AND source_level <> 'local_daily_digest'
         ORDER BY relevance_score DESC, id DESC
@@ -723,14 +968,24 @@ def execute_local_digest_job(job_id: str, day: str) -> dict[str, Any]:
             result = {"date": day, "summary": "当天上海本地采集池暂无有效证据。", "evidence_count": 0}
             complete_ai_job(job_id, result)
             return result
+        events = _cluster_local_events(rows)
         lines: list[str] = []
-        for idx, row in enumerate(rows, 1):
+        for idx, event in enumerate(events, 1):
+            row = event["primary"]
+            supplements = [
+                {
+                    "title": x.get("title"), "url": x.get("url"),
+                    "level": x.get("source_level"), "snippet": (x.get("snippet") or "")[:500],
+                }
+                for x in event.get("supplements", [])
+            ]
             raw = {
                 "topic": row.get("topic_name"), "level": row.get("source_level"),
                 "district": row.get("district"), "street": row.get("street"),
                 "title": row.get("title"), "url": row.get("url"),
-                "snippet": row.get("snippet"), "content": (row.get("content") or "")[:1200],
+                "evidence": (row.get("content") or row.get("snippet") or "")[:1800],
                 "score": row.get("relevance_score"),
+                "supplementary_sources": supplements,
             }
             lines.append(f"[L{idx}] {_safe_json(raw)}")
         context = "\n".join(lines)[:30000]
@@ -744,7 +999,7 @@ def execute_local_digest_job(job_id: str, day: str) -> dict[str, Any]:
         prompt = (
             f"请分析 {day} 上海本地采集池。输出中文 Markdown：\n"
             "# 上海本地新增情报\n## 市级政策\n## 16区重要动态\n## 街镇/社区重要动态\n"
-            "## 三乐专项（静安区→江宁路街道→三乐里）\n## 对现有专题的影响\n## 低价值/重复信息说明\n\n"
+            "## 三乐专项（静安区→江宁路街道→三乐里）\n## 对现有专题的影响\n## 同事件多源交叉验证\n\n"
             f"证据：\n{context}"
         )
         summary, elapsed = _ollama_chat(system, prompt, temperature=0.1)
@@ -761,9 +1016,9 @@ def execute_local_digest_job(job_id: str, day: str) -> dict[str, Any]:
             """), {
                 "d": target, "title": f"{day} 上海本地情报分析", "url": f"local://shanghai-digest/{day}",
                 "snippet": summary[:1500], "content": summary, "hash": digest_hash,
-                "meta": _safe_json({"model_job_id": job_id, "elapsed_seconds": elapsed, "evidence_count": len(rows)}),
+                "meta": _safe_json({"model_job_id": job_id, "elapsed_seconds": elapsed, "evidence_count": len(rows), "event_count": len(events)}),
             })
-        result = {"date": day, "summary": summary, "elapsed_seconds": elapsed, "evidence_count": len(rows)}
+        result = {"date": day, "summary": summary, "elapsed_seconds": elapsed, "evidence_count": len(rows), "event_count": len(events)}
         complete_ai_job(job_id, result)
         return result
     except Exception as exc:
@@ -791,10 +1046,7 @@ def _row_day(obj: Any) -> date | None:
 
 def daily_report_ready(day: str | None = None) -> tuple[bool, dict[str, Any]]:
     target = date.fromisoformat(day) if day else _now().date()
-    now = _now()
     state: dict[str, Any] = {"date": target.isoformat()}
-    if target == now.date() and (now.hour < 3 or (now.hour == 3 and now.minute < DAILY_REPORT_NOT_BEFORE_MINUTE)):
-        return False, {**state, "reason": "not-before-window"}
     try:
         r = _redis()
         if not r.exists(f"ib:v411:collector:done:{target.isoformat()}"):

@@ -375,48 +375,48 @@ def intelligence_qa_v410(job_id: str, payload: dict) -> dict:
     return execute_knowledge_qa_job(job_id, payload)
 # END INTERNETBOARD V4.10 AI SERIAL QUEUE
 
-# BEGIN INTERNETBOARD V4.11 SHANGHAI LOCAL
+# BEGIN INTERNETBOARD V4.12 RELEVANT EVIDENCE
 # Daily automation is Shanghai-local-first. The legacy generic run_all_topics task remains
 # callable manually, but is removed from Celery Beat so the 03:00 automatic pipeline does
 # not re-introduce nationwide generic results. Web/CPU collection is isolated from the
 # single-process research AI queue; final report generation waits until that AI queue settles.
-import os as _v411_os
-from datetime import datetime as _v411_datetime
-from zoneinfo import ZoneInfo as _v411_ZoneInfo
-from celery.schedules import crontab as _v411_crontab
+import os as _v412_os
+from datetime import datetime as _v412_datetime
+from zoneinfo import ZoneInfo as _v412_ZoneInfo
+from celery.schedules import crontab as _v412_crontab
 
 try:
-    _v411_routes = dict(celery_app.conf.task_routes or {})
+    _v412_routes = dict(celery_app.conf.task_routes or {})
 except Exception:
-    _v411_routes = {}
-_v411_routes.update({
+    _v412_routes = {}
+_v412_routes.update({
     "internetboard.local_source_sweep_v411": {"queue": "collect"},
     "internetboard.local_intel_digest_v411": {"queue": "research"},
     "internetboard.daily_report_finalize_v411": {"queue": "control"},
 })
-celery_app.conf.task_routes = _v411_routes
+celery_app.conf.task_routes = _v412_routes
 
 # Retire ONLY the automatic generic all-topic sweep. Manual refresh/run routes still work.
-_v411_beat = {
+_v412_beat = {
     k: v for k, v in dict(celery_app.conf.beat_schedule or {}).items()
     if (v or {}).get("task") != "internetboard.run_all_topics"
 }
-_v411_beat["v411-shanghai-local-0300"] = {
+_v412_beat["v411-shanghai-local-0300"] = {
     "task": "internetboard.local_source_sweep_v411",
-    "schedule": _v411_crontab(hour=3, minute=0),
+    "schedule": _v412_crontab(hour=3, minute=0),
     "options": {"queue": "collect"},
 }
-_v411_beat["v411-daily-report-finalizer"] = {
+_v412_beat["v411-daily-report-finalizer"] = {
     "task": "internetboard.daily_report_finalize_v411",
     "schedule": 300.0,
     "options": {"queue": "control"},
 }
-celery_app.conf.beat_schedule = _v411_beat
+celery_app.conf.beat_schedule = _v412_beat
 
 
-def _v411_day() -> str:
-    tz = _v411_ZoneInfo(_v411_os.getenv("TZ", "Asia/Shanghai"))
-    return _v411_datetime.now(tz).date().isoformat()
+def _v412_day() -> str:
+    tz = _v412_ZoneInfo(_v412_os.getenv("TZ", "Asia/Shanghai"))
+    return _v412_datetime.now(tz).date().isoformat()
 
 
 @celery_app.task(name="internetboard.local_source_sweep_v411")
@@ -424,7 +424,7 @@ def local_source_sweep_v411(day: str | None = None) -> dict:
     from .shanghai_intel import collect_local_evidence
     from .queue_runtime import create_ai_job, fail_ai_job, set_ai_job_task_id
 
-    target = day or _v411_day()
+    target = day or _v412_day()
     report = collect_local_evidence(target)
     if report.get("skipped"):
         return report
@@ -454,7 +454,7 @@ def daily_report_finalize_v411(day: str | None = None) -> dict:
     from .shanghai_intel import daily_report_ready, mark_daily_report_enqueued
     from .queue_runtime import create_ai_job, fail_ai_job, set_ai_job_task_id
 
-    target = day or _v411_day()
+    target = day or _v412_day()
     ready, state = daily_report_ready(target)
     if not ready:
         return state
@@ -472,4 +472,4 @@ def daily_report_finalize_v411(day: str | None = None) -> dict:
         fail_ai_job(job["job_id"], f"enqueue daily report failed: {exc}")
         raise
     return {"date": target, "status": "queued", "job_id": job["job_id"], "task_id": getattr(result, "id", None)}
-# END INTERNETBOARD V4.11 SHANGHAI LOCAL
+# END INTERNETBOARD V4.12 RELEVANT EVIDENCE
